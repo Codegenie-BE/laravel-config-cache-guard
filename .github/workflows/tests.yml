@@ -16,14 +16,6 @@ jobs:
       matrix:
         include:
           - php: '8.2'
-            laravel: '10'
-            testbench: '^8.0'
-            pest: '^2.0'
-          - php: '8.2'
-            laravel: '11'
-            testbench: '^9.0'
-            pest: '^2.0|^3.0'
-          - php: '8.2'
             laravel: '12'
             testbench: '^10.0'
             pest: '^3.0'
@@ -57,9 +49,6 @@ jobs:
 
       - name: Pin Laravel test dependencies
         run: composer require --dev orchestra/testbench:"${{ matrix.testbench }}" pestphp/pest:"${{ matrix.pest }}" --no-update --no-interaction
-
-      - name: Allow compatibility matrix advisory-blocked framework versions
-        run: composer config --no-plugins --no-scripts audit.block-insecure false
 
       - name: Install dependencies
         run: composer update --prefer-stable --prefer-dist --no-interaction
