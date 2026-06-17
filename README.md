@@ -1,13 +1,17 @@
-# Codegenie Laravel Config Cache Guard
+# Laravel Config Cache Guard
 
 [![Tests](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml/badge.svg)](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/codegenie-be/laravel-config-cache-guard.svg)](https://packagist.org/packages/codegenie-be/laravel-config-cache-guard)
+[![Total Downloads](https://img.shields.io/packagist/dt/codegenie-be/laravel-config-cache-guard.svg)](https://packagist.org/packages/codegenie-be/laravel-config-cache-guard)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![PHP](https://img.shields.io/badge/php-%5E8.2-777BB4.svg)](https://www.php.net/supported-versions.php)
 [![Laravel](https://img.shields.io/badge/laravel-12%20%7C%2013-FF2D20.svg)](https://laravel.com/docs/13.x/releases)
 
-A lightweight pre-bootstrap Laravel package that helps prevent production apps from running with stale cached configuration.
+**by [Codegenie](https://www.codegenie.be)**
 
-It is built for Laravel apps where `php artisan config:cache` is used, but where config changes can sometimes be deployed without refreshing the cached config. This is especially useful for FTP deployments, shared hosting and small production apps where deploy steps are intentionally simple.
+Prevent Laravel from running with stale cached configuration after `.env` or `config/*.php` changes.
+
+Built for Laravel 12 and 13 apps on shared hosting, FTP deployments and simple production setups where `php artisan config:cache` can accidentally be forgotten.
 
 > This package is a safety net. The best production flow is still to run `php artisan config:cache` during deployment.
 
@@ -21,7 +25,7 @@ php artisan config-cache-guard:status
 
 The installer adds the guard to `public/index.php` before Laravel bootstraps.
 
-## The problem
+## Why this exists
 
 Laravel can cache all configuration into:
 
@@ -29,9 +33,11 @@ Laravel can cache all configuration into:
 bootstrap/cache/config.php
 ```
 
-That is good for production performance, but it also means that changes in `.env` or `config/*.php` are not automatically reflected until the config cache is rebuilt.
+That is good for production performance, but it also means changes in `.env` or `config/*.php` are not reflected until the config cache is rebuilt.
 
-This package checks whether the source configuration changed before Laravel bootstraps. If it changed, it tries to rebuild Laravel's cached config before the request continues.
+This is easy to forget on shared hosting, FTP deployments or hosting panels where deploy hooks are limited. This package checks whether source configuration metadata changed before Laravel bootstraps. If it changed, it tries to rebuild Laravel's cached config before the request continues.
+
+It does not replace a correct deployment pipeline. It protects you when the cache refresh step was skipped, forgotten or unavailable.
 
 ## What it does
 
@@ -59,7 +65,19 @@ The request then continues with the refreshed cached config.
 - It does not rebuild config cache on every request.
 - It does not replace a proper deployment process.
 
-The package does register a small service provider, but only to expose Artisan commands. The runtime guard itself is loaded directly from `public/index.php` before Laravel bootstraps.
+The package registers a small service provider, but only to expose Artisan commands. The runtime guard itself is loaded directly from `public/index.php` before Laravel bootstraps.
+
+## When to use this package
+
+Use it when:
+
+- you deploy Laravel through FTP or shared hosting
+- your deploy process sometimes forgets `php artisan config:cache`
+- your hosting panel has limited deployment hooks
+- you want a small safety net against stale config cache
+- you want to avoid queues, Redis, cron or background workers
+
+Do not use it as a replacement for a correct deployment pipeline.
 
 ## How it works
 
@@ -313,17 +331,6 @@ This package is intentionally small and file-based.
 - The rebuild command is fixed to `php artisan config:cache`; paths are escaped and no user input is passed to the shell.
 
 Please report security issues privately. See [SECURITY.md](SECURITY.md).
-
-## When to use this package
-
-Use it when:
-
-- you deploy Laravel through FTP or shared hosting
-- your deploy process sometimes forgets `php artisan config:cache`
-- you want a small safety net against stale config cache
-- you want to avoid queues, Redis, cron or background workers
-
-Do not use it as a replacement for a correct deployment pipeline.
 
 ## License
 
