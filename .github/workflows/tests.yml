@@ -58,6 +58,9 @@ jobs:
       - name: Pin Laravel test dependencies
         run: composer require --dev orchestra/testbench:"${{ matrix.testbench }}" pestphp/pest:"${{ matrix.pest }}" --no-update --no-interaction
 
+      - name: Allow compatibility matrix advisory-blocked framework versions
+        run: composer config --no-plugins --no-scripts audit.block-insecure false
+
       - name: Install dependencies
         run: composer update --prefer-stable --prefer-dist --no-interaction
 
