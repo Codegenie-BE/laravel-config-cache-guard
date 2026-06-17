@@ -11,13 +11,13 @@ declare(strict_types=1);
 
     $basePath = dirname(__DIR__, 4);
 
-    $configDir = $basePath . '/config';
-    $cacheDir = $basePath . '/bootstrap/cache';
+    $configDir = $basePath.'/config';
+    $cacheDir = $basePath.'/bootstrap/cache';
 
-    $cachedConfigPath = $cacheDir . '/config.php';
-    $signaturePath = $cacheDir . '/config-source.signature';
-    $lockPath = $cacheDir . '/config-cache-refresh.lock';
-    $failedPath = $cacheDir . '/config-cache-refresh.failed';
+    $cachedConfigPath = $cacheDir.'/config.php';
+    $signaturePath = $cacheDir.'/config-source.signature';
+    $lockPath = $cacheDir.'/config-cache-refresh.lock';
+    $failedPath = $cacheDir.'/config-cache-refresh.failed';
 
     $failureCooldownSeconds = (int) (getenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN') ?: 60);
 
@@ -31,7 +31,7 @@ declare(strict_types=1);
 
     $buildSignature = static function () use ($basePath, $configDir): ?string {
         $files = [];
-        $envPath = $basePath . '/.env';
+        $envPath = $basePath.'/.env';
 
         if (is_file($envPath)) {
             $files[] = $envPath;
@@ -40,7 +40,7 @@ declare(strict_types=1);
         $externalAppEnv = getenv('APP_ENV');
 
         if (is_string($externalAppEnv) && $externalAppEnv !== '') {
-            $environmentEnvPath = $basePath . '/.env.' . $externalAppEnv;
+            $environmentEnvPath = $basePath.'/.env.'.$externalAppEnv;
 
             if (is_file($environmentEnvPath)) {
                 $files[] = $environmentEnvPath;
@@ -81,7 +81,7 @@ declare(strict_types=1);
             }
 
             $parts[] = implode('|', [
-                str_replace($basePath . '/', '', $file),
+                str_replace($basePath.'/', '', $file),
                 (string) ($stats['mtime'] ?? 0),
                 (string) ($stats['ctime'] ?? 0),
                 (string) ($stats['size'] ?? 0),

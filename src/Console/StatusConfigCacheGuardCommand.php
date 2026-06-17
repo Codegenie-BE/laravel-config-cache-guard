@@ -16,9 +16,9 @@ final class StatusConfigCacheGuardCommand extends Command
     {
         $indexPath = public_path('index.php');
         $cachePath = base_path('bootstrap/cache');
-        $cachedConfigPath = $cachePath . '/config.php';
-        $signaturePath = $cachePath . '/config-source.signature';
-        $failedPath = $cachePath . '/config-cache-refresh.failed';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $signaturePath = $cachePath.'/config-source.signature';
+        $failedPath = $cachePath.'/config-cache-refresh.failed';
 
         $installed = false;
 
@@ -35,7 +35,7 @@ final class StatusConfigCacheGuardCommand extends Command
 
         $this->table(['Check', 'Status'], [
             ['Guard enabled', $guardEnabled ? 'yes' : 'no'],
-            ['Failure cooldown', $this->failureCooldownSeconds() . ' seconds'],
+            ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
             ['Installed in public/index.php', $installed ? 'yes' : 'no'],
             ['bootstrap/cache path', $cachePath],
             ['bootstrap/cache writable', $cacheWritable ? 'yes' : 'no'],
