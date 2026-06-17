@@ -74,14 +74,19 @@ declare(strict_types=1);
         $parts = [];
 
         foreach ($files as $file) {
-            $mtime = @filemtime($file);
-            $size = @filesize($file);
+            $stats = @stat($file);
 
-            if ($mtime === false || $size === false) {
+            if (! is_array($stats)) {
                 return null;
             }
 
-            $parts[] = str_replace($basePath . '/', '', $file) . '|' . $mtime . '|' . $size;
+            $parts[] = implode('|', [
+                str_replace($basePath . '/', '', $file),
+                (string) ($stats['mtime'] ?? 0),
+                (string) ($stats['ctime'] ?? 0),
+                (string) ($stats['size'] ?? 0),
+                (string) ($stats['ino'] ?? 0),
+            ]);
         }
 
         $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
@@ -185,6 +190,10 @@ declare(strict_types=1);
     }
 
     if ($isRecentlyFailed($failedPath, $failureCooldownSeconds)) {
+        @unlink($cachedConfigPath);
+        clearstatcache(true, $cachedConfigPath);
+        $invalidateOpcache($cachedConfigPath);
+
         return;
     }
 

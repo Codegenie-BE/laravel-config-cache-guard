@@ -3,13 +3,23 @@
 [![Tests](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml/badge.svg)](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![PHP](https://img.shields.io/badge/php-%5E8.2-777BB4.svg)](https://www.php.net/supported-versions.php)
-[![Laravel](https://img.shields.io/badge/laravel-12%20%7C%2013%20recommended-FF2D20.svg)](https://laravel.com/docs/13.x/releases)
+[![Laravel](https://img.shields.io/badge/laravel-12%20%7C%2013-FF2D20.svg)](https://laravel.com/docs/13.x/releases)
 
 A lightweight pre-bootstrap Laravel package that helps prevent production apps from running with stale cached configuration.
 
 It is built for Laravel apps where `php artisan config:cache` is used, but where config changes can sometimes be deployed without refreshing the cached config. This is especially useful for FTP deployments, shared hosting and small production apps where deploy steps are intentionally simple.
 
 > This package is a safety net. The best production flow is still to run `php artisan config:cache` during deployment.
+
+## Quick start
+
+```bash
+composer require codegenie/laravel-config-cache-guard
+php artisan config-cache-guard:install
+php artisan config-cache-guard:status
+```
+
+The installer adds the guard to `public/index.php` before Laravel bootstraps.
 
 ## The problem
 
@@ -31,7 +41,7 @@ On normal requests, the guard performs a small metadata check against:
 - `.env.{APP_ENV}` when `APP_ENV` is provided as a real server environment variable
 - `config/**/*.php`
 
-It only checks file metadata such as modified time and file size. It does not read or store secret values.
+It only checks file metadata such as timestamps, file size and inode metadata. It does not read or store secret values.
 
 When the signature changed, the guard takes a file lock and runs:
 
@@ -113,28 +123,29 @@ php artisan config-cache-guard:status
 
 This checks:
 
+- whether the guard is enabled
+- which failure cooldown is configured
 - whether the guard is installed in `public/index.php`
 - whether `bootstrap/cache` is writable
 - whether cached config exists
 - whether the signature file exists
+- whether a failed-rebuild marker exists
 - whether `exec()` is available
 - which PHP CLI binary will be used
+
+The command also prints a short result line such as `ready`, `not installed`, `disabled` or `automatic rebuild unavailable`.
 
 ## Requirements
 
 - PHP 8.2 or higher
-- Laravel 12 or 13 recommended
+- Laravel 12 or 13
 - A writable `bootstrap/cache` directory
 - `exec()` and a working PHP CLI binary for automatic cache rebuilding from web requests
-
-Laravel 10 and 11 are technically compatible through the Composer constraints, but they are treated as best-effort only because the Laravel framework versions themselves are no longer security-supported upstream.
 
 ## Compatibility
 
 | Laravel | Package target | PHP range | Framework status |
 | --- | --- | --- | --- |
-| 10 | Best effort | 8.2 - 8.3 | End of life upstream |
-| 11 | Best effort | 8.2 - 8.4 | End of life upstream |
 | 12 | Supported | 8.2 - 8.5 | Security fixes until February 24, 2027 |
 | 13 | Supported | 8.3 - 8.5 | Security fixes until March 17, 2028 |
 
@@ -217,6 +228,12 @@ php artisan config:cache
 
 This package protects you when that step is forgotten, skipped or not available on shared hosting.
 
+## Known limitations
+
+- Automatic rebuilding from a web request requires `exec()` and a working PHP CLI binary.
+- Change detection is metadata-based for performance. It uses file timestamps, size and inode metadata instead of reading `.env` values.
+- This package is a fallback safety net. It should not replace a correct deployment pipeline that runs `php artisan config:cache`.
+
 ## Troubleshooting
 
 ### The status command says `exec available: no`
@@ -293,6 +310,7 @@ This package is intentionally small and file-based.
 - It does not use a database.
 - It does not require Redis, queues, workers or cron.
 - It uses a file lock to avoid concurrent rebuilds.
+- The rebuild command is fixed to `php artisan config:cache`; paths are escaped and no user input is passed to the shell.
 
 Please report security issues privately. See [SECURITY.md](SECURITY.md).
 

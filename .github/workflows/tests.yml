@@ -19,6 +19,10 @@ jobs:
             laravel: '12'
             testbench: '^10.0'
             pest: '^3.0'
+          - php: '8.5'
+            laravel: '12'
+            testbench: '^10.0'
+            pest: '^3.0'
           - php: '8.3'
             laravel: '13'
             testbench: '^11.0'
@@ -43,15 +47,33 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
+          tools: composer:v2
 
       - name: Validate composer.json
         run: composer validate --strict
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ matrix.php }}-laravel-${{ matrix.laravel }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-${{ matrix.php }}-laravel-${{ matrix.laravel }}-
+            ${{ runner.os }}-composer-${{ matrix.php }}-
+            ${{ runner.os }}-composer-
 
       - name: Pin Laravel test dependencies
         run: composer require --dev orchestra/testbench:"${{ matrix.testbench }}" pestphp/pest:"${{ matrix.pest }}" --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --no-interaction
+        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction
+
+      - name: Audit dependencies
+        run: composer audit --no-interaction
 
       - name: Run Pint
         run: vendor/bin/pint --test

@@ -6,11 +6,15 @@
     "homepage": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
     "keywords": [
         "laravel",
+        "php",
+        "composer",
+        "artisan",
         "config",
         "cache",
         "config-cache",
-        "shared-hosting",
         "deployment",
+        "ftp-deployment",
+        "shared-hosting",
         "codegenie"
     ],
     "authors": [
