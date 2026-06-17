@@ -80,7 +80,7 @@ final class InstallConfigCacheGuardCommand extends Command
         $needle = "define('LARAVEL_START', microtime(true));";
 
         if (str_contains($contents, $needle)) {
-            return str_replace($needle, $needle.PHP_EOL.PHP_EOL.$line, $contents);
+            return str_replace($needle, $needle . PHP_EOL . PHP_EOL . $line, $contents);
         }
 
         $autoloadPatterns = [
@@ -92,7 +92,7 @@ final class InstallConfigCacheGuardCommand extends Command
 
         foreach ($autoloadPatterns as $autoloadLine) {
             if (str_contains($contents, $autoloadLine)) {
-                return str_replace($autoloadLine, $line.PHP_EOL.PHP_EOL.$autoloadLine, $contents);
+                return str_replace($autoloadLine, $line . PHP_EOL . PHP_EOL . $autoloadLine, $contents);
             }
         }
 

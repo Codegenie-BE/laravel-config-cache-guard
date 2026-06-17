@@ -16,8 +16,8 @@ final class StatusConfigCacheGuardCommand extends Command
     {
         $indexPath = public_path('index.php');
         $cachePath = base_path('bootstrap/cache');
-        $cachedConfigPath = $cachePath.'/config.php';
-        $signaturePath = $cachePath.'/config-source.signature';
+        $cachedConfigPath = $cachePath . '/config.php';
+        $signaturePath = $cachePath . '/config-source.signature';
 
         $installed = false;
 
