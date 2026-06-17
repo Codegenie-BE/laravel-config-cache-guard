@@ -1,5 +1,5 @@
 {
-    "name": "codegenie/laravel-config-cache-guard",
+    "name": "codegenie-be/laravel-config-cache-guard",
     "description": "A lightweight pre-bootstrap Laravel config cache guard that refreshes stale cached config when config files or environment metadata change.",
     "type": "library",
     "license": "MIT",

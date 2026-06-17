@@ -14,7 +14,7 @@ It is built for Laravel apps where `php artisan config:cache` is used, but where
 ## Quick start
 
 ```bash
-composer require codegenie/laravel-config-cache-guard
+composer require codegenie-be/laravel-config-cache-guard
 php artisan config-cache-guard:install
 php artisan config-cache-guard:status
 ```
@@ -79,14 +79,14 @@ This order is important. A Laravel middleware or service provider is too late fo
 ## Installation
 
 ```bash
-composer require codegenie/laravel-config-cache-guard
+composer require codegenie-be/laravel-config-cache-guard
 php artisan config-cache-guard:install
 ```
 
 The installer adds this line to `public/index.php`:
 
 ```php
-require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 ```
 
 It must be placed before:
@@ -105,7 +105,7 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
-require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -267,7 +267,7 @@ php artisan config-cache-guard:status
 Add the require line manually before `vendor/autoload.php`:
 
 ```php
-require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 ```
 
 ### I want to disable the guard temporarily
@@ -283,13 +283,13 @@ CONFIG_CACHE_GUARD_ENABLED=false
 Remove the require line from `public/index.php`:
 
 ```php
-require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 ```
 
 Then remove the package:
 
 ```bash
-composer remove codegenie/laravel-config-cache-guard
+composer remove codegenie-be/laravel-config-cache-guard
 ```
 
 Optional cleanup:

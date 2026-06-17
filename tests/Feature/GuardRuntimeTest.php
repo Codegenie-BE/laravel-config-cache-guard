@@ -5,7 +5,7 @@ declare(strict_types=1);
 function makeGuardRuntimeProject(): array
 {
     $basePath = sys_get_temp_dir() . '/config-cache-guard-' . bin2hex(random_bytes(8));
-    $packagePath = $basePath . '/vendor/codegenie/laravel-config-cache-guard';
+    $packagePath = $basePath . '/vendor/codegenie-be/laravel-config-cache-guard';
 
     mkdir($packagePath . '/bootstrap', 0777, true);
     mkdir($basePath . '/bootstrap/cache', 0777, true);

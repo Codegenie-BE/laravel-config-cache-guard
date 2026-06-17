@@ -18,7 +18,7 @@ function readPublicIndex(): string
 
 function guardRequireLine(): string
 {
-    return "require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';";
+    return "require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';";
 }
 
 it('installs the guard after the Laravel start marker and before Composer autoloading', function (): void {

@@ -101,6 +101,6 @@ final class InstallConfigCacheGuardCommand extends Command
 
     private function requireLine(): string
     {
-        return "require __DIR__ . '/../vendor/codegenie/laravel-config-cache-guard/bootstrap/guard.php';";
+        return "require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';";
     }
 }
