@@ -1,0 +1,55 @@
+{
+    "name": "codegenie/laravel-config-cache-guard",
+    "description": "A lightweight pre-bootstrap Laravel config cache guard that refreshes stale cached config when config files or environment metadata change.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "config",
+        "cache",
+        "config-cache",
+        "shared-hosting",
+        "deployment",
+        "codegenie"
+    ],
+    "authors": [
+        {
+            "name": "Codegenie",
+            "homepage": "https://www.codegenie.be"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/support": "^10.0|^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+        "pestphp/pest": "^2.0|^3.0|^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Codegenie\\ConfigCacheGuard\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Codegenie\\ConfigCacheGuard\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Codegenie\\ConfigCacheGuard\\ConfigCacheGuardServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "format": "pint",
+        "format:test": "pint --test"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
