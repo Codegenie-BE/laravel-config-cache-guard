@@ -36,6 +36,19 @@ If rebuilding the config cache fails, the stale cached config is removed so Lara
 - A writable `bootstrap/cache` directory
 - `exec()` and a PHP CLI binary when you want automatic cache rebuilding from web requests
 
+Compatibility target:
+
+| Laravel | Package compatibility target | Upstream framework status |
+| --- | --- | --- |
+| 10 | PHP 8.2 - 8.3 | Laravel itself is end-of-life |
+| 11 | PHP 8.2 - 8.4 | Laravel itself is end-of-life |
+| 12 | PHP 8.2 - 8.5 | Laravel security support until February 24, 2027 |
+| 13 | PHP 8.3 - 8.5 | Laravel security support until March 17, 2028 |
+
+Laravel 10 can run on PHP 8.1, but this package intentionally starts at PHP 8.2 because PHP 8.1 is end-of-life.
+
+PHP 8.2 is supported for security fixes only until December 31, 2026. For new production projects, prefer PHP 8.4 or PHP 8.5 when your hosting supports it.
+
 If `exec()` is disabled, the guard can still remove stale config cache, but it cannot rebuild a new cached config automatically from a web request.
 
 ## Installation

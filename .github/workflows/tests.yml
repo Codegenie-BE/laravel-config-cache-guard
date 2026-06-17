@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -11,7 +14,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4']
+        include:
+          - php: '8.2'
+            laravel: '10'
+            testbench: '^8.0'
+            pest: '^2.0'
+          - php: '8.2'
+            laravel: '11'
+            testbench: '^9.0'
+            pest: '^2.0|^3.0'
+          - php: '8.2'
+            laravel: '12'
+            testbench: '^10.0'
+            pest: '^3.0'
+          - php: '8.3'
+            laravel: '13'
+            testbench: '^11.0'
+            pest: '^4.0'
+          - php: '8.4'
+            laravel: '13'
+            testbench: '^11.0'
+            pest: '^4.0'
+          - php: '8.5'
+            laravel: '13'
+            testbench: '^11.0'
+            pest: '^4.0'
+
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
 
     steps:
       - name: Checkout
@@ -25,6 +54,9 @@ jobs:
 
       - name: Validate composer.json
         run: composer validate --strict
+
+      - name: Pin Laravel test dependencies
+        run: composer require --dev orchestra/testbench:"${{ matrix.testbench }}" pestphp/pest:"${{ matrix.pest }}" --no-update --no-interaction
 
       - name: Install dependencies
         run: composer update --prefer-stable --prefer-dist --no-interaction

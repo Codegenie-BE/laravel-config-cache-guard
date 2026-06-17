@@ -3,6 +3,7 @@
     "description": "A lightweight pre-bootstrap Laravel config cache guard that refreshes stale cached config when config files or environment metadata change.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
     "keywords": [
         "laravel",
         "config",
@@ -18,6 +19,10 @@
             "homepage": "https://www.codegenie.be"
         }
     ],
+    "support": {
+        "issues": "https://github.com/Codegenie-BE/laravel-config-cache-guard/issues",
+        "source": "https://github.com/Codegenie-BE/laravel-config-cache-guard"
+    },
     "require": {
         "php": "^8.2",
         "illuminate/console": "^10.0|^11.0|^12.0|^13.0",
@@ -51,5 +56,11 @@
         "format:test": "pint --test"
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
 }
