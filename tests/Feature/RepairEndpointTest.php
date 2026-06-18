@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Console\Kernel as ConsoleKernelContract;
 use Illuminate\Support\Facades\Artisan;
 
 beforeEach(function (): void {
@@ -48,10 +49,32 @@ it('can trigger a protected repair request without exec', function (): void {
     putenv('CONFIG_CACHE_GUARD_CONFIG=true');
     putenv('CONFIG_CACHE_GUARD_ROUTES=false');
 
-    Artisan::shouldReceive('call')
-        ->once()
-        ->with('config:cache')
-        ->andReturn(0);
+    $kernel = new class implements ConsoleKernelContract
+    {
+        public array $calls = [];
+
+        public function bootstrap() {}
+
+        public function handle($input, $output = null) {}
+
+        public function call($command, array $parameters = [], $outputBuffer = null)
+        {
+            $this->calls[] = [$command, $parameters];
+
+            return 0;
+        }
+
+        public function queue($command, array $parameters = []) {}
+
+        public function all() {}
+
+        public function output() {}
+
+        public function terminate($input, $status) {}
+    };
+
+    $this->app->instance(ConsoleKernelContract::class, $kernel);
+    Artisan::clearResolvedInstance(ConsoleKernelContract::class);
 
     @mkdir(base_path('bootstrap/cache'), 0777, true);
     file_put_contents(base_path('bootstrap/cache/config.php'), '<?php return [];');
@@ -60,4 +83,6 @@ it('can trigger a protected repair request without exec', function (): void {
         ->assertOk()
         ->assertJsonPath('ok', true)
         ->assertJsonPath('results.config.status', 'rebuilt');
+
+    expect($kernel->calls)->toBe([['config:cache', []]]);
 });
