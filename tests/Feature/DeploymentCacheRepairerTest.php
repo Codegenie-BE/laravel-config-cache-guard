@@ -11,6 +11,7 @@ function makeRepairerRuntimeProject(): string
     mkdir($basePath.'/bootstrap/cache', 0777, true);
     mkdir($basePath.'/config', 0777, true);
     mkdir($basePath.'/routes', 0777, true);
+    mkdir($basePath.'/storage/framework', 0777, true);
 
     file_put_contents($basePath.'/.env', "APP_NAME=Codegenie\n");
     file_put_contents($basePath.'/config/app.php', "<?php\n\nreturn ['name' => 'Codegenie'];\n");
@@ -144,6 +145,42 @@ it('repairs pending route cache into the configured current route cache file', f
         $staleRoutePath = $cachePath.'/routes-v7.php';
 
         putenv('APP_ROUTES_CACHE=bootstrap/cache/routes-current.php');
+        file_put_contents($cachePath.'/route-cache-refresh.pending', "target=route\nreason=exec_disabled\n");
+        file_put_contents($staleRoutePath, '<?php return [];');
+
+        $calls = [];
+        $callable = static function (string $command) use (&$calls, $currentRoutePath): int {
+            $calls[] = $command;
+
+            if ($command === 'route:cache') {
+                file_put_contents($currentRoutePath, '<?php return [];');
+            }
+
+            return 0;
+        };
+
+        DeploymentCacheRepairer::runPending($basePath, $cachePath, $callable);
+
+        expect($calls)->toBe(['route:cache']);
+        expect(is_file($currentRoutePath))->toBeTrue();
+        expect(is_file($staleRoutePath))->toBeFalse();
+        expect(is_file($cachePath.'/route-source.signature'))->toBeTrue();
+        expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
+        expect(is_file($cachePath.'/route-cache-refresh.failed'))->toBeFalse();
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('repairs pending route cache into a custom route cache file outside the default glob', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+
+    try {
+        $currentRoutePath = $basePath.'/storage/framework/custom-routes.php';
+        $staleRoutePath = $cachePath.'/routes-v7.php';
+
+        putenv('APP_ROUTES_CACHE=storage/framework/custom-routes.php');
         file_put_contents($cachePath.'/route-cache-refresh.pending', "target=route\nreason=exec_disabled\n");
         file_put_contents($staleRoutePath, '<?php return [];');
 

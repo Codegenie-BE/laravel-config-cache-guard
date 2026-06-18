@@ -35,8 +35,13 @@ final class RouteCacheFiles
     public static function all(string $cachePath): array
     {
         $paths = glob(rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-*.php') ?: [];
+        $currentPath = self::current($cachePath);
 
-        return array_values(array_filter($paths, 'is_string'));
+        if (is_file($currentPath)) {
+            $paths[] = $currentPath;
+        }
+
+        return array_values(array_unique(array_filter($paths, 'is_string')));
     }
 
     /**

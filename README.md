@@ -223,6 +223,7 @@ Pre-bootstrap options should preferably be real server environment variables bec
 | `CONFIG_CACHE_GUARD_FAIL_HARD` | `false` | Show a safe 503 error page when pre-bootstrap refresh cannot continue. Leave this `false` when you want in-app auto repair to run automatically. |
 | `CONFIG_CACHE_GUARD_PHP_BINARY` | auto-detect | Optional full path to the PHP CLI binary. |
 | `PHP_CLI_BINARY` | auto-detect | Secondary PHP CLI binary override. |
+| `APP_ROUTES_CACHE` | Laravel default | Optional Laravel route cache path override. Explicit custom paths are respected; guard-managed signature paths are only used when no custom path is configured. |
 | `APP_ENV` | optional | When provided externally, `.env.{APP_ENV}` is included in metadata signatures. |
 
 Example:
@@ -285,7 +286,7 @@ The guard may create or update these files inside `bootstrap/cache`:
 | In-app auto repair succeeds | Rebuild through Laravel without `exec()`, update signatures and remove pending markers. |
 | In-app auto repair fails | Remove stale cache file and write a safe failed marker. |
 
-Removing stale config cache files is intentional. For routes, the guard avoids stale reads by switching Laravel to a route-cache filename derived from the current route source signature. Running uncached for one request is slower, but safer than continuing with old configuration or old routes.
+Removing stale config cache files is intentional. For routes, the guard avoids stale reads by switching Laravel to a route-cache filename derived from the current route source signature. Explicit custom `APP_ROUTES_CACHE` paths are respected. Running uncached for one request is slower, but safer than continuing with old configuration or old routes.
 
 ## Testing manually
 

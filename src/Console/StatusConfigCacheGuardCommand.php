@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Codegenie\ConfigCacheGuard\Console;
 
+use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
 use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
@@ -27,7 +28,6 @@ final class StatusConfigCacheGuardCommand extends Command
         $routeFailedPath = $cachePath.'/route-cache-refresh.failed';
         $routePendingPath = $cachePath.'/route-cache-refresh.pending';
         $routeCachePaths = $this->routeCachePaths($cachePath);
-        $currentRouteCachePath = RouteCacheFiles::current($cachePath);
 
         if ($this->option('clear-failures')) {
             @unlink($configFailedPath);
@@ -52,6 +52,7 @@ final class StatusConfigCacheGuardCommand extends Command
         $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
         $createConfigWhenMissing = Environment::flag('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
+        $currentRouteCachePath = $this->effectiveRouteCachePath($cachePath, $routeGuardEnabled);
         $execAvailable = $this->canUseExec();
         $phpBinary = $this->resolvePhpBinary();
         $cacheWritable = is_writable($cachePath);
@@ -149,6 +150,25 @@ final class StatusConfigCacheGuardCommand extends Command
     private function routeCachePaths(string $cachePath): array
     {
         return RouteCacheFiles::all($cachePath);
+    }
+
+    private function effectiveRouteCachePath(string $cachePath, bool $routeGuardEnabled): string
+    {
+        if (
+            ! $routeGuardEnabled
+            || Environment::string('APP_ROUTES_CACHE') !== null
+            || ! Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
+        ) {
+            return RouteCacheFiles::current($cachePath);
+        }
+
+        $signature = DeploymentCacheSignatures::routes(base_path());
+
+        if ($signature === null) {
+            return RouteCacheFiles::current($cachePath);
+        }
+
+        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
     }
 
     private function canUseExec(): bool
