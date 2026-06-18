@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 
 final class StatusConfigCacheGuardCommand extends Command
 {
-    protected $signature = 'config-cache-guard:status {--clear-failures : Remove config and route failure markers}';
+    protected $signature = 'config-cache-guard:status {--clear-failures : Remove config and route failure and pending markers}';
 
     protected $description = 'Show the current Codegenie Laravel Config Cache Guard status.';
 
@@ -21,64 +21,62 @@ final class StatusConfigCacheGuardCommand extends Command
         $cachedConfigPath = $cachePath.'/config.php';
         $configSignaturePath = $cachePath.'/config-source.signature';
         $configFailedPath = $cachePath.'/config-cache-refresh.failed';
+        $configPendingPath = $cachePath.'/config-cache-refresh.pending';
         $routeSignaturePath = $cachePath.'/route-source.signature';
         $routeFailedPath = $cachePath.'/route-cache-refresh.failed';
+        $routePendingPath = $cachePath.'/route-cache-refresh.pending';
         $routeCachePaths = $this->routeCachePaths($cachePath);
 
         if ($this->option('clear-failures')) {
             @unlink($configFailedPath);
+            @unlink($configPendingPath);
             @unlink($routeFailedPath);
+            @unlink($routePendingPath);
 
-            $this->info('Config Cache Guard failure markers were cleared.');
+            $this->info('Config Cache Guard failure and pending markers were cleared.');
         }
 
-        $installed = false;
+        $legacyIndexRequire = false;
 
         if (is_file($indexPath)) {
             $contents = file_get_contents($indexPath);
-            $installed = is_string($contents)
+            $legacyIndexRequire = is_string($contents)
                 && str_contains($contents, 'laravel-config-cache-guard/bootstrap/guard.php');
         }
 
         $guardEnabled = Environment::flag('CONFIG_CACHE_GUARD_ENABLED');
         $configGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_CONFIG');
         $routeGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_ROUTES');
-        $repairRouteEnabled = Environment::flag('CONFIG_CACHE_GUARD_REPAIR_ENABLED', true);
-        $repairTokenConfigured = Environment::string('CONFIG_CACHE_GUARD_REPAIR_TOKEN') !== null;
-        $repairGetAllowed = Environment::flag('CONFIG_CACHE_GUARD_REPAIR_ALLOW_GET', false);
+        $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
+        $createConfigWhenMissing = Environment::flag('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
         $execAvailable = $this->canUseExec();
         $phpBinary = $this->resolvePhpBinary();
         $cacheWritable = is_writable($cachePath);
 
         $this->table(['Check', 'Status'], [
+            ['Composer autoload integration', 'yes'],
+            ['Legacy public/index.php require', $legacyIndexRequire ? 'yes (remove recommended)' : 'no'],
             ['Guard enabled', $guardEnabled ? 'yes' : 'no'],
             ['Config guard enabled', $configGuardEnabled ? 'yes' : 'no'],
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
+            ['Create config cache when missing', $createConfigWhenMissing ? 'yes' : 'no'],
+            ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
-            ['Installed in public/index.php', $installed ? 'yes' : 'no'],
             ['bootstrap/cache path', $cachePath],
             ['bootstrap/cache writable', $cacheWritable ? 'yes' : 'no'],
             ['cached config exists', is_file($cachedConfigPath) ? 'yes' : 'no'],
             ['config signature exists', is_file($configSignaturePath) ? 'yes' : 'no'],
+            ['config pending repair', FailureMarker::summary($configPendingPath) ?? 'no'],
             ['config failed marker', FailureMarker::summary($configFailedPath) ?? 'no'],
             ['cached routes exist', $routeCachePaths === [] ? 'no' : 'yes ('.count($routeCachePaths).')'],
             ['route signature exists', is_file($routeSignaturePath) ? 'yes' : 'no'],
+            ['route pending repair', FailureMarker::summary($routePendingPath) ?? 'no'],
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
             ['exec available', $execAvailable ? 'yes' : 'no'],
             ['PHP CLI binary', $phpBinary ?? 'not found'],
-            ['Repair endpoint enabled', $repairRouteEnabled && $repairTokenConfigured ? 'yes' : 'no'],
-            ['Repair token configured', $repairTokenConfigured ? 'yes' : 'no'],
-            ['Repair GET allowed', $repairGetAllowed ? 'yes' : 'no'],
-            ['Repair endpoint', $repairRouteEnabled && $repairTokenConfigured ? url('/_config-cache-guard/repair') : 'disabled'],
         ]);
-
-        if (! $installed) {
-            $this->warn('Result: not installed. Run: php artisan config-cache-guard:install');
-
-            return self::SUCCESS;
-        }
 
         if (! $guardEnabled) {
             $this->warn('Result: installed, but currently disabled through CONFIG_CACHE_GUARD_ENABLED.');
@@ -98,11 +96,16 @@ final class StatusConfigCacheGuardCommand extends Command
             return self::SUCCESS;
         }
 
+        if ($legacyIndexRequire) {
+            $this->warn('Notice: public/index.php still contains the old manual require line. It is safe, but no longer needed.');
+            $this->line('Run: php artisan config-cache-guard:install --remove-legacy');
+        }
+
         if (! $execAvailable || $phpBinary === null) {
-            if ($repairRouteEnabled && $repairTokenConfigured) {
-                $this->warn('Result: automatic rebuild from web requests is unavailable, but the protected repair endpoint can rebuild through Laravel without exec().');
+            if ($autoRepairEnabled) {
+                $this->warn('Result: pre-bootstrap rebuild through exec is unavailable, but in-app auto repair can rebuild through Artisan::call() after Laravel boots.');
             } else {
-                $this->warn('Result: automatic rebuild from web requests is unavailable. Configure CONFIG_CACHE_GUARD_REPAIR_TOKEN to enable the protected repair endpoint without exec().');
+                $this->warn('Result: automatic rebuild from web requests is unavailable. Enable CONFIG_CACHE_GUARD_AUTO_REPAIR or configure exec/PHP CLI.');
             }
 
             return self::SUCCESS;
@@ -110,7 +113,7 @@ final class StatusConfigCacheGuardCommand extends Command
 
         if ($routeGuardEnabled && $routeCachePaths === []) {
             $message = $configGuardEnabled
-                ? 'Result: ready. Config cache refresh is available. Route cache refresh will activate when a route cache file exists.'
+                ? 'Result: ready. Config cache refresh is available when config cache exists. Route cache refresh will activate when a route cache file exists.'
                 : 'Result: ready. Route cache refresh will activate when a route cache file exists.';
 
             $this->info($message);

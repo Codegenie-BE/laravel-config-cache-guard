@@ -32,12 +32,9 @@ final class DeploymentCacheSignatures
     public static function routes(string $basePath): ?string
     {
         $files = self::collectPhpFiles($basePath.'/routes');
-        $packagePath = dirname(__DIR__, 2);
-
         foreach ([
             $basePath.'/bootstrap/app.php',
             $basePath.'/app/Providers/RouteServiceProvider.php',
-            $packagePath.'/routes/repair.php',
         ] as $routeSourceFile) {
             if (is_file($routeSourceFile)) {
                 $files[] = $routeSourceFile;
@@ -48,11 +45,7 @@ final class DeploymentCacheSignatures
             $files[] = $envFile;
         }
 
-        return self::build($basePath, $files, [
-            'repair_enabled='.(Environment::flag('CONFIG_CACHE_GUARD_REPAIR_ENABLED', true) ? 'yes' : 'no'),
-            'repair_token_configured='.(Environment::string('CONFIG_CACHE_GUARD_REPAIR_TOKEN') !== null ? 'yes' : 'no'),
-            'repair_allow_get='.(Environment::flag('CONFIG_CACHE_GUARD_REPAIR_ALLOW_GET', false) ? 'yes' : 'no'),
-        ]);
+        return self::build($basePath, $files);
     }
 
     public static function write(string $path, ?string $signature): void

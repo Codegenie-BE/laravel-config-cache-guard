@@ -8,19 +8,21 @@ use Illuminate\Console\Command;
 
 final class InstallConfigCacheGuardCommand extends Command
 {
-    protected $signature = 'config-cache-guard:install {--dry-run : Show what would be changed without writing to public/index.php}';
+    protected $signature = 'config-cache-guard:install
+        {--dry-run : Show what would be changed without writing to public/index.php}
+        {--remove-legacy : Remove the old manual public/index.php require line when it exists}';
 
-    protected $description = 'Install the Codegenie Laravel Config Cache Guard in public/index.php.';
+    protected $description = 'Check the Codegenie Laravel Config Cache Guard installation.';
 
     public function handle(): int
     {
         $indexPath = public_path('index.php');
 
         if (! is_file($indexPath)) {
-            $this->error('public/index.php was not found. Install the guard manually.');
-            $this->line($this->requireLine());
+            $this->info('Codegenie Config Cache Guard is loaded by Composer automatically.');
+            $this->warn('public/index.php was not found, so legacy cleanup could not be checked.');
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         $contents = file_get_contents($indexPath);
@@ -31,33 +33,53 @@ final class InstallConfigCacheGuardCommand extends Command
             return self::FAILURE;
         }
 
-        if (str_contains($contents, 'laravel-config-cache-guard/bootstrap/guard.php')) {
-            $this->info('Codegenie Config Cache Guard is already installed.');
+        $legacyLinePresent = str_contains($contents, 'laravel-config-cache-guard/bootstrap/guard.php');
+
+        if ($this->option('remove-legacy')) {
+            return $this->removeLegacyRequireLine($indexPath, $contents, $legacyLinePresent);
+        }
+
+        $this->info('Codegenie Config Cache Guard is loaded by Composer automatically.');
+        $this->line('No manual public/index.php change is required for current versions.');
+
+        if ($legacyLinePresent) {
+            $this->warn('A legacy manual require line still exists in public/index.php. It is safe but no longer needed.');
+            $this->line('Run this to remove it: php artisan config-cache-guard:install --remove-legacy');
+        } else {
+            $this->info('No legacy public/index.php require line was found.');
+        }
+
+        return self::SUCCESS;
+    }
+
+    private function removeLegacyRequireLine(string $indexPath, string $contents, bool $legacyLinePresent): int
+    {
+        if (! $legacyLinePresent) {
+            $this->info('No legacy public/index.php require line was found.');
 
             return self::SUCCESS;
         }
 
-        $updatedContents = $this->insertRequireLine($contents);
+        $updatedContents = $this->withoutLegacyRequireLine($contents);
 
-        if ($updatedContents === null) {
-            $this->error('Could not find a safe insertion point in public/index.php.');
-            $this->line('Add this line manually before vendor/autoload.php:');
-            $this->line($this->requireLine());
+        if ($updatedContents === $contents) {
+            $this->warn('A legacy reference was detected, but it could not be removed automatically.');
+            $this->line('Remove this line manually when present:');
+            $this->line($this->legacyRequireLine());
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         if ($this->option('dry-run')) {
-            $this->info('Dry run only. Add this line to public/index.php before vendor/autoload.php:');
-            $this->line($this->requireLine());
+            $this->info('Dry run only. The legacy public/index.php require line would be removed.');
 
             return self::SUCCESS;
         }
 
         if (! is_writable($indexPath)) {
             $this->error('public/index.php is not writable.');
-            $this->line('Add this line manually before vendor/autoload.php:');
-            $this->line($this->requireLine());
+            $this->line('Remove this line manually when present:');
+            $this->line($this->legacyRequireLine());
 
             return self::FAILURE;
         }
@@ -68,38 +90,31 @@ final class InstallConfigCacheGuardCommand extends Command
             return self::FAILURE;
         }
 
-        $this->info('Codegenie Config Cache Guard installed successfully.');
-        $this->line('public/index.php now loads the guard before Laravel bootstraps.');
+        $this->info('Legacy public/index.php require line removed successfully.');
+        $this->line('The guard is now loaded through Composer autoload only.');
 
         return self::SUCCESS;
     }
 
-    private function insertRequireLine(string $contents): ?string
+    private function withoutLegacyRequireLine(string $contents): string
     {
-        $line = $this->requireLine();
-        $needle = "define('LARAVEL_START', microtime(true));";
-
-        if (str_contains($contents, $needle)) {
-            return str_replace($needle, $needle.PHP_EOL.PHP_EOL.$line, $contents);
-        }
-
-        $autoloadPatterns = [
-            "require __DIR__.'/../vendor/autoload.php';",
-            "require __DIR__ . '/../vendor/autoload.php';",
-            "require_once __DIR__.'/../vendor/autoload.php';",
-            "require_once __DIR__ . '/../vendor/autoload.php';",
+        $patterns = [
+            "require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';",
+            "require_once __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';",
+            "require __DIR__.'/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';",
+            "require_once __DIR__.'/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';",
         ];
 
-        foreach ($autoloadPatterns as $autoloadLine) {
-            if (str_contains($contents, $autoloadLine)) {
-                return str_replace($autoloadLine, $line.PHP_EOL.PHP_EOL.$autoloadLine, $contents);
-            }
+        foreach ($patterns as $pattern) {
+            $contents = str_replace($pattern.PHP_EOL.PHP_EOL, '', $contents);
+            $contents = str_replace(PHP_EOL.$pattern, '', $contents);
+            $contents = str_replace($pattern, '', $contents);
         }
 
-        return null;
+        return preg_replace("/\n{3,}/", PHP_EOL.PHP_EOL, $contents) ?? $contents;
     }
 
-    private function requireLine(): string
+    private function legacyRequireLine(): string
     {
         return "require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';";
     }
