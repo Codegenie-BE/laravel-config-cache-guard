@@ -13,6 +13,8 @@ final class ConfigCacheGuardServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        $this->loadRoutesFrom(__DIR__.'/../routes/repair.php');
+
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallConfigCacheGuardCommand::class,
