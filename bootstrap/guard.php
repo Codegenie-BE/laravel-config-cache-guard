@@ -43,6 +43,12 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return ! in_array(strtolower($value), ['0', 'false', 'off', 'no'], true);
     };
 
+    $setEnvString = static function (string $name, string $value): void {
+        putenv($name.'='.$value);
+        $_ENV[$name] = $value;
+        $_SERVER[$name] = $value;
+    };
+
     if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && ! $envFlagEnabled('CONFIG_CACHE_GUARD_ALLOW_CLI', false)) {
         return;
     }
@@ -455,6 +461,26 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return is_array($values) ? $values : [];
     };
 
+    $resolveCachePath = static function (string $path) use ($basePath): string {
+        if (
+            str_starts_with($path, '/')
+            || str_starts_with($path, '\\')
+            || preg_match('/^[A-Za-z]:[\/\\\\]/', $path) === 1
+        ) {
+            return $path;
+        }
+
+        return $basePath.'/'.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+    };
+
+    $isManagedRouteCachePath = static function (?string $path): bool {
+        if ($path === null) {
+            return false;
+        }
+
+        return preg_match('#^bootstrap/cache/routes-[a-f0-9]{16,64}\.php$#i', str_replace('\\', '/', $path)) === 1;
+    };
+
     /**
      * @param  array<string, mixed>  $target
      */
@@ -476,6 +502,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
     ): void {
         $artisanCommand = $target['artisan_command'] ?? null;
         $cachedFilesCallback = $target['cached_files'] ?? null;
+        $cleanupFilesCallback = $target['cleanup_files'] ?? static fn (): array => [];
         $createWhenMissing = ($target['create_when_missing'] ?? false) === true;
         $failedPath = $target['failed_path'] ?? null;
         $failOnRecentFailure = ($target['fail_on_recent_failure'] ?? true) !== false;
@@ -484,6 +511,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $pendingPath = $target['pending_path'] ?? null;
         $signaturePath = $target['signature_path'] ?? null;
         $sourceFilesCallback = $target['source_files'] ?? null;
+
+        if (! is_callable($cleanupFilesCallback)) {
+            $cleanupFilesCallback = static fn (): array => [];
+        }
 
         if (
             ! is_string($artisanCommand)
@@ -627,6 +658,13 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     }
                 }
 
+                foreach ($arrayFromCallback($cleanupFilesCallback) as $cleanupFile) {
+                    if (is_string($cleanupFile) && ! in_array($cleanupFile, $cachedFiles, true)) {
+                        @unlink($cleanupFile);
+                        $invalidateOpcache($cleanupFile);
+                    }
+                }
+
                 return;
             }
 
@@ -674,31 +712,56 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
     if ($envFlagEnabled('CONFIG_CACHE_GUARD_ROUTES')) {
         $routeCacheFiles = static fn (): array => glob($cacheDir.'/routes-*.php') ?: [];
+        $routeSourceFiles = static function () use ($basePath, $collectPhpFiles, $envFiles): array {
+            $files = array_merge($collectPhpFiles($basePath.'/routes'), $envFiles());
+
+            foreach ([
+                $basePath.'/bootstrap/app.php',
+                $basePath.'/app/Providers/RouteServiceProvider.php',
+            ] as $routeSourceFile) {
+                if (is_file($routeSourceFile)) {
+                    $files[] = $routeSourceFile;
+                }
+            }
+
+            return $files;
+        };
 
         if ($routeCacheFiles() !== []) {
+            $configuredRouteCachePath = $envString('APP_ROUTES_CACHE');
+            $routeSignature = $buildSignature($routeSourceFiles());
+            $canManageRouteCachePath = $configuredRouteCachePath === null
+                || $isManagedRouteCachePath($configuredRouteCachePath);
+            $routeCachePath = $configuredRouteCachePath !== null
+                ? $resolveCachePath($configuredRouteCachePath)
+                : $cacheDir.'/routes-v7.php';
+            $createRouteCacheWhenMissing = $configuredRouteCachePath !== null;
+
+            if (
+                $canManageRouteCachePath
+                && $routeSignature !== null
+                && $envFlagEnabled('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
+            ) {
+                $relativeRouteCachePath = 'bootstrap/cache/routes-'.$routeSignature.'.php';
+                $routeCachePath = $basePath.'/'.$relativeRouteCachePath;
+                $createRouteCacheWhenMissing = true;
+                $setEnvString('APP_ROUTES_CACHE', $relativeRouteCachePath);
+            }
+
             $refreshDeploymentCache([
                 'artisan_command' => 'route:cache',
-                'cached_files' => $routeCacheFiles,
-                'create_when_missing' => false,
+                'cached_files' => static fn (): array => [$routeCachePath],
+                'cleanup_files' => static fn (): array => array_values(array_filter(
+                    $routeCacheFiles(),
+                    static fn (string $path): bool => str_replace('\\', '/', $path) !== str_replace('\\', '/', $routeCachePath)
+                )),
+                'create_when_missing' => $createRouteCacheWhenMissing,
                 'failed_path' => $cacheDir.'/route-cache-refresh.failed',
                 'lock_path' => $cacheDir.'/route-cache-refresh.lock',
                 'name' => 'route',
                 'pending_path' => $cacheDir.'/route-cache-refresh.pending',
                 'signature_path' => $cacheDir.'/route-source.signature',
-                'source_files' => static function () use ($basePath, $collectPhpFiles, $envFiles): array {
-                    $files = array_merge($collectPhpFiles($basePath.'/routes'), $envFiles());
-
-                    foreach ([
-                        $basePath.'/bootstrap/app.php',
-                        $basePath.'/app/Providers/RouteServiceProvider.php',
-                    ] as $routeSourceFile) {
-                        if (is_file($routeSourceFile)) {
-                            $files[] = $routeSourceFile;
-                        }
-                    }
-
-                    return $files;
-                },
+                'source_files' => $routeSourceFiles,
             ]);
         }
     }

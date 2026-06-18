@@ -6,6 +6,7 @@ namespace Codegenie\ConfigCacheGuard\Console;
 
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
+use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
 use Illuminate\Console\Command;
 
 final class StatusConfigCacheGuardCommand extends Command
@@ -26,6 +27,7 @@ final class StatusConfigCacheGuardCommand extends Command
         $routeFailedPath = $cachePath.'/route-cache-refresh.failed';
         $routePendingPath = $cachePath.'/route-cache-refresh.pending';
         $routeCachePaths = $this->routeCachePaths($cachePath);
+        $currentRouteCachePath = RouteCacheFiles::current($cachePath);
 
         if ($this->option('clear-failures')) {
             @unlink($configFailedPath);
@@ -62,6 +64,7 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
             ['Create config cache when missing', $createConfigWhenMissing ? 'yes' : 'no'],
             ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
+            ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
             ['bootstrap/cache path', $cachePath],
@@ -71,6 +74,8 @@ final class StatusConfigCacheGuardCommand extends Command
             ['config pending repair', FailureMarker::summary($configPendingPath) ?? 'no'],
             ['config failed marker', FailureMarker::summary($configFailedPath) ?? 'no'],
             ['cached routes exist', $routeCachePaths === [] ? 'no' : 'yes ('.count($routeCachePaths).')'],
+            ['current route cache path', $currentRouteCachePath],
+            ['current route cache exists', is_file($currentRouteCachePath) ? 'yes' : 'no'],
             ['route signature exists', is_file($routeSignaturePath) ? 'yes' : 'no'],
             ['route pending repair', FailureMarker::summary($routePendingPath) ?? 'no'],
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
@@ -143,7 +148,7 @@ final class StatusConfigCacheGuardCommand extends Command
      */
     private function routeCachePaths(string $cachePath): array
     {
-        return glob($cachePath.'/routes-*.php') ?: [];
+        return RouteCacheFiles::all($cachePath);
     }
 
     private function canUseExec(): bool

@@ -7,6 +7,7 @@ namespace Codegenie\ConfigCacheGuard\Http\Controllers;
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
+use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -131,21 +132,17 @@ final class RepairConfigCacheGuardController
     {
         try {
             $exitCode = Artisan::call('route:cache');
-            $routeCachePaths = $this->routeCachePaths($cachePath);
+            $routeCachePath = RouteCacheFiles::current($cachePath);
 
-            if ($exitCode === 0 && $routeCachePaths !== []) {
+            if ($exitCode === 0 && is_file($routeCachePath)) {
                 DeploymentCacheSignatures::write(
                     $cachePath.'/route-source.signature',
                     DeploymentCacheSignatures::routes($basePath)
                 );
 
                 @unlink($cachePath.'/route-cache-refresh.failed');
-
-                foreach ($routeCachePaths as $routeCachePath) {
-                    if (function_exists('opcache_invalidate')) {
-                        @opcache_invalidate($routeCachePath, true);
-                    }
-                }
+                $this->invalidateOpcache($routeCachePath);
+                RouteCacheFiles::removeStale($cachePath);
 
                 return [
                     'ok' => true,
@@ -157,9 +154,7 @@ final class RepairConfigCacheGuardController
             // A safe diagnostic marker is written below. Command output and exception details are intentionally not exposed.
         }
 
-        foreach ($this->routeCachePaths($cachePath) as $routeCachePath) {
-            @unlink($routeCachePath);
-        }
+        @unlink(RouteCacheFiles::current($cachePath));
 
         FailureMarker::write(
             $cachePath.'/route-cache-refresh.failed',
@@ -186,16 +181,8 @@ final class RepairConfigCacheGuardController
             return true;
         }
 
-        return $this->routeCachePaths($cachePath) !== []
+        return RouteCacheFiles::all($cachePath) !== []
             || is_file($cachePath.'/route-cache-refresh.failed');
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function routeCachePaths(string $cachePath): array
-    {
-        return glob($cachePath.'/routes-*.php') ?: [];
     }
 
     private function notFound(Request $request): JsonResponse|Response
@@ -249,5 +236,14 @@ final class RepairConfigCacheGuardController
         }
 
         return '';
+    }
+
+    private function invalidateOpcache(string $path): void
+    {
+        clearstatcache(true, $path);
+
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($path, true);
+        }
     }
 }
