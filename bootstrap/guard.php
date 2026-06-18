@@ -3,20 +3,17 @@
 declare(strict_types=1);
 
 /**
- * @phpstan-type GuardTarget array{
- *     artisan_command: string,
- *     cached_files: callable(): list<string>,
- *     create_when_missing: bool,
- *     failed_path: string,
- *     fail_on_recent_failure?: bool,
- *     lock_path: string,
- *     name: string,
- *     signature_path: string,
- *     source_files: callable(): list<string>,
- *     source_values?: callable(): list<string>
- * }
+ * Codegenie Laravel Config Cache Guard
+ *
+ * This file is loaded by Composer before Laravel bootstraps. It intentionally
+ * avoids Laravel classes so it can safely remove stale deployment cache files
+ * before Laravel has a chance to load them.
  */
-(static function (): void {
+$definedVariables = get_defined_vars();
+$composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
+
+(static function (?string $composerAutoloadPath): void {
+
     /**
      * @return non-empty-string|null
      */
@@ -46,12 +43,85 @@ declare(strict_types=1);
         return ! in_array(strtolower($value), ['0', 'false', 'off', 'no'], true);
     };
 
+    if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && ! $envFlagEnabled('CONFIG_CACHE_GUARD_ALLOW_CLI', false)) {
+        return;
+    }
+
+    $loadedKey = realpath(__FILE__) ?: __FILE__;
+    $loadedGuards = $GLOBALS['__codegenie_config_cache_guard_loaded'] ?? [];
+
+    if (! is_array($loadedGuards)) {
+        $loadedGuards = [];
+    }
+
+    if (($loadedGuards[$loadedKey] ?? false) === true) {
+        return;
+    }
+
+    $loadedGuards[$loadedKey] = true;
+    $GLOBALS['__codegenie_config_cache_guard_loaded'] = $loadedGuards;
+
     if (! $envFlagEnabled('CONFIG_CACHE_GUARD_ENABLED')) {
         return;
     }
 
-    $basePath = dirname(__DIR__, 4);
-    $packagePath = dirname(__DIR__);
+    $resolveBasePath = static function () use ($composerAutoloadPath): ?string {
+        $candidates = [];
+
+        if ($composerAutoloadPath !== null && is_file($composerAutoloadPath)) {
+            $candidates[] = dirname(dirname($composerAutoloadPath));
+        }
+
+        $vendorBasedPath = dirname(__DIR__, 4);
+        $candidates[] = $vendorBasedPath;
+
+        $scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
+
+        if (is_string($scriptFilename) && $scriptFilename !== '') {
+            $publicPath = dirname($scriptFilename);
+            $candidates[] = dirname($publicPath);
+        }
+
+        $documentRoot = $_SERVER['DOCUMENT_ROOT'] ?? null;
+
+        if (is_string($documentRoot) && $documentRoot !== '') {
+            $candidates[] = dirname($documentRoot);
+        }
+
+        $cwd = getcwd();
+
+        if ($cwd !== false) {
+            $candidates[] = $cwd;
+
+            if (basename($cwd) === 'public') {
+                $candidates[] = dirname($cwd);
+            }
+        }
+
+        foreach (array_unique($candidates) as $candidate) {
+            $candidate = rtrim($candidate, DIRECTORY_SEPARATOR);
+
+            if ($candidate === '') {
+                continue;
+            }
+
+            if (
+                is_dir($candidate.'/bootstrap/cache')
+                && (is_file($candidate.'/artisan') || is_dir($candidate.'/config') || is_dir($candidate.'/routes'))
+            ) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    };
+
+    $basePath = $resolveBasePath();
+
+    if ($basePath === null) {
+        return;
+    }
+
     $cacheDir = $basePath.'/bootstrap/cache';
 
     if (! is_dir($cacheDir)) {
@@ -65,6 +135,8 @@ declare(strict_types=1);
     }
 
     $failHard = $envFlagEnabled('CONFIG_CACHE_GUARD_FAIL_HARD', false);
+    $autoRepair = $envFlagEnabled('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
+    $createConfigWhenMissing = $envFlagEnabled('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
 
     /**
      * @return list<string>
@@ -121,7 +193,10 @@ declare(strict_types=1);
         return $files;
     };
 
-    $buildSignature = static function (array $files, array $values = []) use ($basePath): ?string {
+    /**
+     * @param  array<int, mixed>  $files
+     */
+    $buildSignature = static function (array $files) use ($basePath): ?string {
         $validFiles = [];
 
         foreach ($files as $file) {
@@ -132,22 +207,11 @@ declare(strict_types=1);
 
         $files = array_values(array_unique($validFiles));
 
-        $validValues = [];
-
-        foreach ($values as $value) {
-            if (is_string($value)) {
-                $validValues[] = $value;
-            }
-        }
-
-        $values = array_values(array_unique($validValues));
-
-        if ($files === [] && $values === []) {
+        if ($files === []) {
             return null;
         }
 
         sort($files, SORT_STRING);
-        sort($values, SORT_STRING);
 
         $parts = [];
 
@@ -165,10 +229,6 @@ declare(strict_types=1);
                 (string) $stats['size'],
                 (string) $stats['ino'],
             ]);
-        }
-
-        foreach ($values as $value) {
-            $parts[] = 'value|'.$value;
         }
 
         $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
@@ -195,11 +255,16 @@ declare(strict_types=1);
     };
 
     $invalidateOpcache = static function (string $path): void {
+        clearstatcache(true, $path);
+
         if (function_exists('opcache_invalidate')) {
             @opcache_invalidate($path, true);
         }
     };
 
+    /**
+     * @param  array<int, mixed>  $paths
+     */
     $removeCachedFiles = static function (array $paths) use ($invalidateOpcache): void {
         foreach ($paths as $path) {
             if (! is_string($path) || $path === '') {
@@ -207,11 +272,13 @@ declare(strict_types=1);
             }
 
             @unlink($path);
-            clearstatcache(true, $path);
             $invalidateOpcache($path);
         }
     };
 
+    /**
+     * @param  array<int, mixed>  $paths
+     */
     $cacheExists = static function (array $paths): bool {
         foreach ($paths as $path) {
             if (is_string($path) && is_file($path)) {
@@ -222,20 +289,33 @@ declare(strict_types=1);
         return false;
     };
 
-    $writeFailureMarker = static function (string $path, string $target, string $reason, string $message, string $action): void {
-        $contents = implode(PHP_EOL, [
-            'Codegenie Laravel Config Cache Guard failure',
+    $markerContents = static function (string $title, string $target, string $reason, string $message, string $action): string {
+        return implode(PHP_EOL, [
+            $title,
             'generated_at='.gmdate('c'),
             'target='.$target,
             'reason='.$reason,
             'message='.$message,
             'action='.$action,
-            'repair_endpoint=/_config-cache-guard/repair',
             'note=No .env values, secrets, tokens or command output are stored in this file.',
             '',
         ]);
+    };
 
-        @file_put_contents($path, $contents, LOCK_EX);
+    $writeFailureMarker = static function (string $path, string $target, string $reason, string $message, string $action) use ($markerContents): void {
+        @file_put_contents(
+            $path,
+            $markerContents('Codegenie Laravel Config Cache Guard failure', $target, $reason, $message, $action),
+            LOCK_EX
+        );
+    };
+
+    $writePendingMarker = static function (string $path, string $target, string $reason, string $message, string $action) use ($markerContents): void {
+        @file_put_contents(
+            $path,
+            $markerContents('Codegenie Laravel Config Cache Guard pending auto repair', $target, $reason, $message, $action),
+            LOCK_EX
+        );
     };
 
     $showFailure = static function (string $target, string $reason, string $message, string $action): void {
@@ -248,7 +328,6 @@ declare(strict_types=1);
         echo '<p><strong>Reason:</strong> '.htmlspecialchars($reason, ENT_QUOTES, 'UTF-8').'</p>';
         echo '<p>'.htmlspecialchars($message, ENT_QUOTES, 'UTF-8').'</p>';
         echo '<p><strong>Action:</strong> '.htmlspecialchars($action, ENT_QUOTES, 'UTF-8').'</p>';
-        echo '<p>You can also enable the protected repair endpoint with <code>CONFIG_CACHE_GUARD_REPAIR_TOKEN</code> to rebuild through Laravel without <code>exec()</code>.</p>';
         echo '<p>No .env values, secrets, tokens or command output are shown.</p>';
         echo '</body></html>';
 
@@ -261,6 +340,33 @@ declare(strict_types=1);
         if ($failHard) {
             $showFailure($name, $reason, $message, $action);
         }
+    };
+
+    $queueAutoRepairOrFail = static function (string $pendingPath, string $failedPath, string $name, string $reason, string $message, string $action) use ($autoRepair, $writePendingMarker, $showFailure, $failHard, $fail): void {
+        if ($autoRepair) {
+            @unlink($failedPath);
+
+            $writePendingMarker(
+                $pendingPath,
+                $name,
+                $reason,
+                $message,
+                'Laravel will try to rebuild this cache through Artisan::call() after the application boots.'
+            );
+
+            if ($failHard) {
+                $showFailure(
+                    $name,
+                    $reason,
+                    $message,
+                    'A pending auto repair marker was written, but fail-hard mode stops this request before Laravel can boot. Disable CONFIG_CACHE_GUARD_FAIL_HARD to allow in-app auto repair.'
+                );
+            }
+
+            return;
+        }
+
+        $fail($failedPath, $name, $reason, $message, $action);
     };
 
     $isRecentlyFailed = static function (string $path, int $cooldownSeconds): bool {
@@ -338,12 +444,18 @@ declare(strict_types=1);
         return $exitCode === 0;
     };
 
+    /**
+     * @return array<int, mixed>
+     */
     $arrayFromCallback = static function (callable $callback): array {
         $values = $callback();
 
         return is_array($values) ? $values : [];
     };
 
+    /**
+     * @param  array<string, mixed>  $target
+     */
     $refreshDeploymentCache = static function (array $target) use (
         $buildSignature,
         $readSignature,
@@ -357,7 +469,8 @@ declare(strict_types=1);
         $runArtisan,
         $arrayFromCallback,
         $failureCooldownSeconds,
-        $fail
+        $fail,
+        $queueAutoRepairOrFail
     ): void {
         $artisanCommand = $target['artisan_command'] ?? null;
         $cachedFilesCallback = $target['cached_files'] ?? null;
@@ -366,9 +479,9 @@ declare(strict_types=1);
         $failOnRecentFailure = ($target['fail_on_recent_failure'] ?? true) !== false;
         $lockPath = $target['lock_path'] ?? null;
         $name = $target['name'] ?? null;
+        $pendingPath = $target['pending_path'] ?? null;
         $signaturePath = $target['signature_path'] ?? null;
         $sourceFilesCallback = $target['source_files'] ?? null;
-        $sourceValuesCallback = $target['source_values'] ?? null;
 
         if (
             ! is_string($artisanCommand)
@@ -376,6 +489,7 @@ declare(strict_types=1);
             || ! is_string($failedPath)
             || ! is_string($lockPath)
             || ! is_string($name)
+            || ! is_string($pendingPath)
             || ! is_string($signaturePath)
             || ! is_callable($sourceFilesCallback)
         ) {
@@ -383,8 +497,7 @@ declare(strict_types=1);
         }
 
         $sourceFiles = $arrayFromCallback($sourceFilesCallback);
-        $sourceValues = is_callable($sourceValuesCallback) ? $arrayFromCallback($sourceValuesCallback) : [];
-        $currentSignature = $buildSignature($sourceFiles, $sourceValues);
+        $currentSignature = $buildSignature($sourceFiles);
 
         if ($currentSignature === null) {
             return;
@@ -405,6 +518,7 @@ declare(strict_types=1);
 
         if ($isRecentlyFailed($failedPath, $failureCooldownSeconds)) {
             $removeCachedFiles($cachedFiles);
+            @unlink($pendingPath);
 
             if ($failOnRecentFailure) {
                 $fail(
@@ -412,7 +526,7 @@ declare(strict_types=1);
                     $name,
                     'recent_failure_cooldown',
                     'Automatic '.$name.' cache refresh recently failed and is waiting before retrying.',
-                    'Use the protected repair endpoint or fix the hosting environment before retrying.'
+                    'Fix the cause shown in this marker, then clear failure markers or wait for the cooldown.'
                 );
             }
 
@@ -433,8 +547,7 @@ declare(strict_types=1);
             clearstatcache();
 
             $sourceFiles = $arrayFromCallback($sourceFilesCallback);
-            $sourceValues = is_callable($sourceValuesCallback) ? $arrayFromCallback($sourceValuesCallback) : [];
-            $currentSignature = $buildSignature($sourceFiles, $sourceValues);
+            $currentSignature = $buildSignature($sourceFiles);
 
             if ($currentSignature === null) {
                 return;
@@ -455,12 +568,13 @@ declare(strict_types=1);
 
             if (! $canUseExec()) {
                 $removeCachedFiles($cachedFiles);
-                $fail(
+                $queueAutoRepairOrFail(
+                    $pendingPath,
                     $failedPath,
                     $name,
                     'exec_disabled',
-                    'Automatic '.$name.' cache refresh cannot run because PHP exec() is unavailable or disabled on this hosting account.',
-                    'Ask your hosting provider to enable exec(), or use the protected repair endpoint to rebuild through Laravel without exec().'
+                    'Automatic '.$name.' cache refresh cannot run before Laravel boots because PHP exec() is unavailable or disabled on this hosting account.',
+                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after Laravel boots.'
                 );
 
                 return;
@@ -470,12 +584,13 @@ declare(strict_types=1);
 
             if ($phpBinary === null) {
                 $removeCachedFiles($cachedFiles);
-                $fail(
+                $queueAutoRepairOrFail(
+                    $pendingPath,
                     $failedPath,
                     $name,
                     'php_cli_not_found',
-                    'Automatic '.$name.' cache refresh cannot run because no PHP CLI binary was found.',
-                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or use the protected repair endpoint.'
+                    'Automatic '.$name.' cache refresh cannot run before Laravel boots because no PHP CLI binary was found.',
+                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or let the in-app auto repair fallback rebuild after Laravel boots.'
                 );
 
                 return;
@@ -488,10 +603,10 @@ declare(strict_types=1);
             if ($rebuilt && $targetCacheExists) {
                 $writeSignature($signaturePath, $currentSignature);
                 @unlink($failedPath);
+                @unlink($pendingPath);
 
                 foreach ($cachedFiles as $cachedFile) {
                     if (is_string($cachedFile)) {
-                        clearstatcache(true, $cachedFile);
                         $invalidateOpcache($cachedFile);
                     }
                 }
@@ -500,12 +615,13 @@ declare(strict_types=1);
             }
 
             $removeCachedFiles($cachedFiles);
-            $fail(
+            $queueAutoRepairOrFail(
+                $pendingPath,
                 $failedPath,
                 $name,
                 'artisan_command_failed',
-                'The '.$artisanCommand.' command did not complete successfully.',
-                'Run the command manually, check whether it works in this application, or use the protected repair endpoint.'
+                'The '.$artisanCommand.' command did not complete successfully before Laravel booted.',
+                'Check whether this application can run the command successfully, or let the in-app auto repair fallback try after Laravel boots.'
             );
         } finally {
             flock($lock, LOCK_UN);
@@ -520,10 +636,11 @@ declare(strict_types=1);
             $refreshDeploymentCache([
                 'artisan_command' => 'config:cache',
                 'cached_files' => static fn (): array => [$cacheDir.'/config.php'],
-                'create_when_missing' => true,
+                'create_when_missing' => $createConfigWhenMissing,
                 'failed_path' => $cacheDir.'/config-cache-refresh.failed',
                 'lock_path' => $cacheDir.'/config-cache-refresh.lock',
                 'name' => 'config',
+                'pending_path' => $cacheDir.'/config-cache-refresh.pending',
                 'signature_path' => $cacheDir.'/config-source.signature',
                 'source_files' => static function () use ($collectPhpFiles, $configDir, $envFiles): array {
                     return array_merge($collectPhpFiles($configDir), $envFiles());
@@ -543,14 +660,14 @@ declare(strict_types=1);
                 'failed_path' => $cacheDir.'/route-cache-refresh.failed',
                 'lock_path' => $cacheDir.'/route-cache-refresh.lock',
                 'name' => 'route',
+                'pending_path' => $cacheDir.'/route-cache-refresh.pending',
                 'signature_path' => $cacheDir.'/route-source.signature',
-                'source_files' => static function () use ($basePath, $packagePath, $collectPhpFiles, $envFiles): array {
+                'source_files' => static function () use ($basePath, $collectPhpFiles, $envFiles): array {
                     $files = array_merge($collectPhpFiles($basePath.'/routes'), $envFiles());
 
                     foreach ([
                         $basePath.'/bootstrap/app.php',
                         $basePath.'/app/Providers/RouteServiceProvider.php',
-                        $packagePath.'/routes/repair.php',
                     ] as $routeSourceFile) {
                         if (is_file($routeSourceFile)) {
                             $files[] = $routeSourceFile;
@@ -559,14 +676,7 @@ declare(strict_types=1);
 
                     return $files;
                 },
-                'source_values' => static function () use ($envFlagEnabled, $envString): array {
-                    return [
-                        'repair_enabled='.($envFlagEnabled('CONFIG_CACHE_GUARD_REPAIR_ENABLED', true) ? 'yes' : 'no'),
-                        'repair_token_configured='.($envString('CONFIG_CACHE_GUARD_REPAIR_TOKEN') !== null ? 'yes' : 'no'),
-                        'repair_allow_get='.($envFlagEnabled('CONFIG_CACHE_GUARD_REPAIR_ALLOW_GET', false) ? 'yes' : 'no'),
-                    ];
-                },
             ]);
         }
     }
-})();
+})(is_string($composerAutoloadPath) ? $composerAutoloadPath : null);

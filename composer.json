@@ -1,6 +1,6 @@
 {
     "name": "codegenie-be/laravel-config-cache-guard",
-    "description": "Prevent Laravel from running with stale cached configuration or routes after .env, config or route changes, with a protected repair endpoint for shared hosting without exec().",
+    "description": "Prevent Laravel from using stale config or route cache after deployment changes, with Composer autoload integration and in-app auto repair for shared hosting.",
     "type": "library",
     "license": "MIT",
     "homepage": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
@@ -22,10 +22,10 @@
         "artisan",
         "env",
         "php",
-        "repair-endpoint",
         "exec-disabled",
         "artisan-call",
-        "codegenie"
+        "codegenie",
+        "auto-repair"
     ],
     "authors": [
         {
@@ -51,7 +51,10 @@
     "autoload": {
         "psr-4": {
             "Codegenie\\ConfigCacheGuard\\": "src/"
-        }
+        },
+        "files": [
+            "bootstrap/guard.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

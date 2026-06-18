@@ -15,7 +15,6 @@ final class FailureMarker
             'reason='.$reason,
             'message='.$message,
             'action='.$action,
-            'repair_endpoint=/_config-cache-guard/repair',
             'note=No .env values, secrets, tokens or command output are stored in this file.',
             '',
         ]);

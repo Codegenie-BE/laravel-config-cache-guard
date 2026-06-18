@@ -14,7 +14,9 @@ function makeGuardRuntimeProject(): array
 
     copy(dirname(__DIR__, 2).'/bootstrap/guard.php', $packagePath.'/bootstrap/guard.php');
 
+    file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php\n");
     file_put_contents($basePath.'/.env', "APP_NAME=Codegenie\n");
+    putenv('CONFIG_CACHE_GUARD_ALLOW_CLI=true');
     file_put_contents($basePath.'/config/app.php', "<?php\n\nreturn ['name' => 'Codegenie'];\n");
     file_put_contents($basePath.'/routes/web.php', "<?php\n\nuse Illuminate\\Support\\Facades\\Route;\n\nRoute::get('/', fn () => 'ok');\n");
 
@@ -51,9 +53,9 @@ function resetGuardRuntimeEnvironment(): void
     putenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN');
     putenv('CONFIG_CACHE_GUARD_PHP_BINARY');
     putenv('CONFIG_CACHE_GUARD_FAIL_HARD');
-    putenv('CONFIG_CACHE_GUARD_REPAIR_ENABLED');
-    putenv('CONFIG_CACHE_GUARD_REPAIR_TOKEN');
-    putenv('CONFIG_CACHE_GUARD_REPAIR_ALLOW_GET');
+    putenv('CONFIG_CACHE_GUARD_AUTO_REPAIR');
+    putenv('CONFIG_CACHE_GUARD_ALLOW_CLI');
+    putenv('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE');
     putenv('PHP_CLI_BINARY');
 }
 
@@ -162,14 +164,16 @@ it('does not create route cache when no cached route file exists', function (): 
     }
 });
 
-it('writes a safe diagnostic marker when automatic config rebuild cannot run', function (): void {
+it('writes a safe pending marker when pre-bootstrap config rebuild cannot run', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
     try {
         $cachedConfigPath = $basePath.'/bootstrap/cache/config.php';
+        $pendingPath = $basePath.'/bootstrap/cache/config-cache-refresh.pending';
         $failedPath = $basePath.'/bootstrap/cache/config-cache-refresh.failed';
 
         file_put_contents($cachedConfigPath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
 
         putenv('CONFIG_CACHE_GUARD_ENABLED=true');
         putenv('CONFIG_CACHE_GUARD_CONFIG=true');
@@ -178,13 +182,65 @@ it('writes a safe diagnostic marker when automatic config rebuild cannot run', f
 
         include $guardPath;
 
+        $contents = (string) file_get_contents($pendingPath);
+
+        expect(is_file($cachedConfigPath))->toBeFalse();
+        expect(is_file($failedPath))->toBeFalse();
+        expect($contents)->toContain('Codegenie Laravel Config Cache Guard pending auto repair');
+        expect($contents)->toContain('reason=artisan_command_failed');
+        expect($contents)->toContain('Artisan::call()');
+        expect($contents)->toContain('No .env values, secrets, tokens or command output');
+        expect($contents)->not->toContain('APP_NAME=Codegenie');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('writes a safe diagnostic marker when auto repair is disabled', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachedConfigPath = $basePath.'/bootstrap/cache/config.php';
+        $pendingPath = $basePath.'/bootstrap/cache/config-cache-refresh.pending';
+        $failedPath = $basePath.'/bootstrap/cache/config-cache-refresh.failed';
+
+        file_put_contents($cachedConfigPath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+        putenv('CONFIG_CACHE_GUARD_AUTO_REPAIR=false');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
         $contents = (string) file_get_contents($failedPath);
 
         expect(is_file($cachedConfigPath))->toBeFalse();
+        expect(is_file($pendingPath))->toBeFalse();
         expect($contents)->toContain('reason=artisan_command_failed');
-        expect($contents)->toContain('repair_endpoint=/_config-cache-guard/repair');
         expect($contents)->toContain('No .env values, secrets, tokens or command output');
         expect($contents)->not->toContain('APP_NAME=Codegenie');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('does not create config cache when no cached config file exists by default', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($basePath.'/bootstrap/cache/config.php'))->toBeFalse();
+        expect(is_file($basePath.'/bootstrap/cache/config-cache-refresh.pending'))->toBeFalse();
+        expect(is_file($basePath.'/bootstrap/cache/config-cache-refresh.failed'))->toBeFalse();
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);

@@ -16,12 +16,12 @@ function readPublicIndex(): string
     return (string) file_get_contents(public_path('index.php'));
 }
 
-function guardRequireLine(): string
+function legacyGuardRequireLine(): string
 {
     return "require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';";
 }
 
-it('installs the guard after the Laravel start marker and before Composer autoloading', function (): void {
+it('does not require a manual public index change for current installations', function (): void {
     writePublicIndex(<<<'PHP_INDEX'
 <?php
 
@@ -33,50 +33,65 @@ $app = require_once __DIR__ . '/../bootstrap/app.php';
 PHP_INDEX);
 
     $this->artisan('config-cache-guard:install')
+        ->expectsOutputToContain('loaded by Composer automatically')
         ->assertExitCode(0);
 
-    $contents = readPublicIndex();
-
-    $startPosition = strpos($contents, "define('LARAVEL_START', microtime(true));");
-    $guardPosition = strpos($contents, guardRequireLine());
-    $autoloadPosition = strpos($contents, "require __DIR__ . '/../vendor/autoload.php';");
-
-    expect($contents)->toContain(guardRequireLine());
-    expect($startPosition)->not->toBeFalse();
-    expect($guardPosition)->not->toBeFalse();
-    expect($autoloadPosition)->not->toBeFalse();
-    expect($startPosition)->toBeLessThan($guardPosition);
-    expect($guardPosition)->toBeLessThan($autoloadPosition);
+    expect(readPublicIndex())->not->toContain('laravel-config-cache-guard/bootstrap/guard.php');
 });
 
-it('does not install the guard twice', function (): void {
+it('reports a legacy public index require line when it exists', function (): void {
     writePublicIndex(<<<'PHP_INDEX'
 <?php
 
 define('LARAVEL_START', microtime(true));
 
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
+
 require __DIR__ . '/../vendor/autoload.php';
 PHP_INDEX);
 
-    $this->artisan('config-cache-guard:install')->assertExitCode(0);
-    $this->artisan('config-cache-guard:install')->assertExitCode(0);
+    $this->artisan('config-cache-guard:install')
+        ->expectsOutputToContain('legacy manual require line')
+        ->assertExitCode(0);
 
-    expect(substr_count(readPublicIndex(), 'laravel-config-cache-guard/bootstrap/guard.php'))->toBe(1);
+    expect(readPublicIndex())->toContain(legacyGuardRequireLine());
 });
 
-it('does not change public index during a dry run', function (): void {
+it('removes the legacy public index require line when requested', function (): void {
+    writePublicIndex(<<<'PHP_INDEX'
+<?php
+
+define('LARAVEL_START', microtime(true));
+
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
+
+require __DIR__ . '/../vendor/autoload.php';
+PHP_INDEX);
+
+    $this->artisan('config-cache-guard:install', ['--remove-legacy' => true])
+        ->assertExitCode(0);
+
+    expect(readPublicIndex())->not->toContain('laravel-config-cache-guard/bootstrap/guard.php');
+    expect(readPublicIndex())->toContain("require __DIR__ . '/../vendor/autoload.php';");
+});
+
+it('does not change public index during a dry run legacy cleanup', function (): void {
     $original = <<<'PHP_INDEX'
 <?php
 
 define('LARAVEL_START', microtime(true));
+
+require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 
 require __DIR__ . '/../vendor/autoload.php';
 PHP_INDEX;
 
     writePublicIndex($original);
 
-    $this->artisan('config-cache-guard:install', ['--dry-run' => true])
-        ->assertExitCode(0);
+    $this->artisan('config-cache-guard:install', [
+        '--dry-run' => true,
+        '--remove-legacy' => true,
+    ])->assertExitCode(0);
 
     expect(readPublicIndex())->toBe($original);
 });
