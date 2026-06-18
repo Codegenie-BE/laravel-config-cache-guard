@@ -18,17 +18,11 @@ final class RefreshAfterRouteCacheRepair
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $response = $next($request);
-
-        if (! $this->shouldRefresh($request)) {
-            return $response;
+        if ($this->shouldRefresh($request) && DeploymentCacheRepairer::routeCacheWasRepairedFor($request)) {
+            return $this->redirectToCurrentUrl($request);
         }
 
-        if (! DeploymentCacheRepairer::routeCacheWasRepairedFor($request)) {
-            return $response;
-        }
-
-        return $this->redirectToCurrentUrl($request);
+        return $next($request);
     }
 
     private function shouldRefresh(Request $request): bool

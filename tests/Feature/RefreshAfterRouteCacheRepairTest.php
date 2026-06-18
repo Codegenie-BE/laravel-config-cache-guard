@@ -29,6 +29,21 @@ it('redirects browser get requests after route cache auto repair', function (): 
     expect($response->headers->get('X-Config-Cache-Guard-Refresh'))->toBe('route-cache-repaired');
 });
 
+it('redirects before dispatching through stale routes after route cache auto repair', function (): void {
+    $request = Request::create('https://example.test/new-route', 'GET');
+    $request->attributes->set(DeploymentCacheRepairer::ROUTE_CACHE_REPAIRED_ATTRIBUTE, true);
+
+    $response = (new RefreshAfterRouteCacheRepair)->handle(
+        $request,
+        static function (): Response {
+            throw new RuntimeException('The stale route pipeline should not run.');
+        }
+    );
+
+    expect($response->getStatusCode())->toBe(302);
+    expect($response->headers->get('Location'))->toBe('https://example.test/new-route');
+});
+
 it('does not redirect json requests after route cache auto repair', function (): void {
     $request = Request::create('https://example.test/api/status', 'GET', server: [
         'HTTP_ACCEPT' => 'application/json',
