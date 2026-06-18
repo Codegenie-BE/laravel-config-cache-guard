@@ -49,6 +49,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $_SERVER[$name] = $value;
     };
 
+    $unsetEnvString = static function (string $name): void {
+        putenv($name);
+        unset($_ENV[$name], $_SERVER[$name]);
+    };
+
     if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && ! $envFlagEnabled('CONFIG_CACHE_GUARD_ALLOW_CLI', false)) {
         return;
     }
@@ -710,8 +715,32 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         }
     }
 
-    if ($envFlagEnabled('CONFIG_CACHE_GUARD_ROUTES')) {
-        $routeCacheFiles = static fn (): array => glob($cacheDir.'/routes-*.php') ?: [];
+    $routeGuardEnabled = $envFlagEnabled('CONFIG_CACHE_GUARD_ROUTES');
+    $versionedRouteCacheEnabled = $envFlagEnabled('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true);
+    $managedRouteCacheMarker = 'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE';
+    $configuredRouteCachePath = $envString('APP_ROUTES_CACHE');
+    $guardManagedRouteCachePath = $envFlagEnabled($managedRouteCacheMarker, false)
+        || $isManagedRouteCachePath($configuredRouteCachePath);
+
+    if ((! $routeGuardEnabled || ! $versionedRouteCacheEnabled) && $guardManagedRouteCachePath) {
+        $unsetEnvString('APP_ROUTES_CACHE');
+        $unsetEnvString($managedRouteCacheMarker);
+        $configuredRouteCachePath = null;
+    }
+
+    if ($routeGuardEnabled) {
+        $configuredRouteCacheAbsolutePath = $configuredRouteCachePath !== null
+            ? $resolveCachePath($configuredRouteCachePath)
+            : null;
+        $routeCacheFiles = static function () use ($cacheDir, $configuredRouteCacheAbsolutePath): array {
+            $files = glob($cacheDir.'/routes-*.php') ?: [];
+
+            if ($configuredRouteCacheAbsolutePath !== null && is_file($configuredRouteCacheAbsolutePath)) {
+                $files[] = $configuredRouteCacheAbsolutePath;
+            }
+
+            return array_values(array_unique(array_filter($files, 'is_string')));
+        };
         $routeSourceFiles = static function () use ($basePath, $collectPhpFiles, $envFiles): array {
             $files = array_merge($collectPhpFiles($basePath.'/routes'), $envFiles());
 
@@ -728,7 +757,6 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         };
 
         if ($routeCacheFiles() !== []) {
-            $configuredRouteCachePath = $envString('APP_ROUTES_CACHE');
             $routeSignature = $buildSignature($routeSourceFiles());
             $canManageRouteCachePath = $configuredRouteCachePath === null
                 || $isManagedRouteCachePath($configuredRouteCachePath);
@@ -740,12 +768,13 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             if (
                 $canManageRouteCachePath
                 && $routeSignature !== null
-                && $envFlagEnabled('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
+                && $versionedRouteCacheEnabled
             ) {
                 $relativeRouteCachePath = 'bootstrap/cache/routes-'.$routeSignature.'.php';
                 $routeCachePath = $basePath.'/'.$relativeRouteCachePath;
                 $createRouteCacheWhenMissing = true;
                 $setEnvString('APP_ROUTES_CACHE', $relativeRouteCachePath);
+                $setEnvString($managedRouteCacheMarker, 'true');
             }
 
             $refreshDeploymentCache([

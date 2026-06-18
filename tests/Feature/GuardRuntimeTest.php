@@ -58,6 +58,7 @@ function resetGuardRuntimeEnvironment(): void
         'CONFIG_CACHE_GUARD_ALLOW_CLI',
         'CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE',
         'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
+        'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE',
         'APP_ROUTES_CACHE',
         'PHP_CLI_BINARY',
     ] as $name) {
@@ -251,6 +252,61 @@ it('can keep the legacy route cache path when versioned route cache files are di
         include $guardPath;
 
         expect(getenv('APP_ROUTES_CACHE'))->toBeFalse();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('clears a guard-managed route cache path when versioned route cache files are disabled', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $staleRoutePath = $basePath.'/bootstrap/cache/routes-v7.php';
+
+        file_put_contents($staleRoutePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('APP_ROUTES_CACHE=bootstrap/cache/routes-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.php');
+        putenv('CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE=true');
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=false');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=true');
+        putenv('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE=false');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
+        expect(getenv('APP_ROUTES_CACHE'))->toBeFalse();
+        expect(getenv('CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE'))->toBeFalse();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('respects an explicit custom route cache path', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $customRoutePath = $basePath.'/bootstrap/cache/custom-routes.php';
+        $pendingPath = $basePath.'/bootstrap/cache/route-cache-refresh.pending';
+
+        file_put_contents($customRoutePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('APP_ROUTES_CACHE=bootstrap/cache/custom-routes.php');
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=false');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=true');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
+        expect(getenv('APP_ROUTES_CACHE'))->toBe('bootstrap/cache/custom-routes.php');
+        expect(getenv('CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE'))->toBeFalse();
+        expect(is_file($customRoutePath))->toBeTrue();
+        expect(is_file($pendingPath))->toBeTrue();
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
