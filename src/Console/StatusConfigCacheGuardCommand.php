@@ -109,7 +109,7 @@ final class StatusConfigCacheGuardCommand extends Command
 
         if (! $execAvailable || $phpBinary === null) {
             if ($autoRepairEnabled) {
-                $this->warn('Result: pre-bootstrap rebuild through exec is unavailable, but in-app auto repair can rebuild through Artisan::call() after Laravel boots.');
+                $this->warn('Result: pre-bootstrap rebuild through exec is unavailable, but in-app auto repair can rebuild through Artisan::call() after the current HTTP response is sent.');
             } else {
                 $this->warn('Result: automatic rebuild from web requests is unavailable. Enable CONFIG_CACHE_GUARD_AUTO_REPAIR or configure exec/PHP CLI.');
             }

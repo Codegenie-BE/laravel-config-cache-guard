@@ -362,7 +362,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 $name,
                 $reason,
                 $message,
-                'Laravel will try to rebuild this cache through Artisan::call() after the application boots.'
+                'Laravel will try to rebuild this cache through Artisan::call() after the current HTTP response is sent.'
             );
 
             if ($failHard) {
@@ -514,6 +514,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $lockPath = $target['lock_path'] ?? null;
         $name = $target['name'] ?? null;
         $pendingPath = $target['pending_path'] ?? null;
+        $removeCachedFilesWhenPending = ($target['remove_cached_files_when_pending'] ?? true) === true;
         $signaturePath = $target['signature_path'] ?? null;
         $sourceFilesCallback = $target['source_files'] ?? null;
 
@@ -555,7 +556,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         }
 
         if ($isRecentlyFailed($failedPath, $failureCooldownSeconds)) {
-            $removeCachedFiles($cachedFiles);
+            if ($removeCachedFilesWhenPending) {
+                $removeCachedFiles($cachedFiles);
+            }
+
             @unlink($pendingPath);
 
             if ($failOnRecentFailure) {
@@ -605,7 +609,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             }
 
             if (! $canUseExec()) {
-                if ($name !== 'route') {
+                if ($removeCachedFilesWhenPending) {
                     $removeCachedFiles($cachedFiles);
                 }
 
@@ -615,10 +619,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     $name,
                     'exec_disabled',
                     'Automatic '.$name.' cache refresh cannot run before Laravel boots because PHP exec() is unavailable or disabled on this hosting account.',
-                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after Laravel boots.'
+                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after the current HTTP response is sent.'
                 );
 
-                if (! $queued) {
+                if (! $queued && ! $removeCachedFilesWhenPending) {
                     $removeCachedFiles($cachedFiles);
                 }
 
@@ -628,7 +632,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             $phpBinary = $resolvePhpBinary();
 
             if ($phpBinary === null) {
-                if ($name !== 'route') {
+                if ($removeCachedFilesWhenPending) {
                     $removeCachedFiles($cachedFiles);
                 }
 
@@ -638,10 +642,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     $name,
                     'php_cli_not_found',
                     'Automatic '.$name.' cache refresh cannot run before Laravel boots because no PHP CLI binary was found.',
-                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or let the in-app auto repair fallback rebuild after Laravel boots.'
+                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or let the in-app auto repair fallback rebuild after the current HTTP response is sent.'
                 );
 
-                if (! $queued) {
+                if (! $queued && ! $removeCachedFilesWhenPending) {
                     $removeCachedFiles($cachedFiles);
                 }
 
@@ -673,7 +677,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 return;
             }
 
-            if ($name !== 'route') {
+            if ($removeCachedFilesWhenPending) {
                 $removeCachedFiles($cachedFiles);
             }
 
@@ -683,10 +687,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 $name,
                 'artisan_command_failed',
                 'The '.$artisanCommand.' command did not complete successfully before Laravel booted.',
-                'Check whether this application can run the command successfully, or let the in-app auto repair fallback try after Laravel boots.'
+                'Check whether this application can run the command successfully, or let the in-app auto repair fallback try after the current HTTP response is sent.'
             );
 
-            if (! $queued) {
+            if (! $queued && ! $removeCachedFilesWhenPending) {
                 $removeCachedFiles($cachedFiles);
             }
         } finally {
@@ -765,11 +769,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 : $cacheDir.'/routes-v7.php';
             $createRouteCacheWhenMissing = $configuredRouteCachePath !== null;
 
-            if (
-                $canManageRouteCachePath
+            $routeCacheWillBeBypassed = $canManageRouteCachePath
                 && $routeSignature !== null
-                && $versionedRouteCacheEnabled
-            ) {
+                && $versionedRouteCacheEnabled;
+
+            if ($routeCacheWillBeBypassed) {
                 $relativeRouteCachePath = 'bootstrap/cache/routes-'.$routeSignature.'.php';
                 $routeCachePath = $basePath.'/'.$relativeRouteCachePath;
                 $createRouteCacheWhenMissing = true;
@@ -789,6 +793,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 'lock_path' => $cacheDir.'/route-cache-refresh.lock',
                 'name' => 'route',
                 'pending_path' => $cacheDir.'/route-cache-refresh.pending',
+                'remove_cached_files_when_pending' => ! $routeCacheWillBeBypassed,
                 'signature_path' => $cacheDir.'/route-source.signature',
                 'source_files' => $routeSourceFiles,
             ]);

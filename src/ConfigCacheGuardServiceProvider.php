@@ -27,12 +27,11 @@ final class ConfigCacheGuardServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->booted(static function (): void {
-            DeploymentCacheRepairer::runPending(
-                base_path(),
-                base_path('bootstrap/cache')
-            );
-        });
+        DeploymentCacheRepairer::runPendingAfterResponse(
+            $this->app,
+            base_path(),
+            base_path('bootstrap/cache')
+        );
     }
 
     private function registerRefreshMiddleware(): void
