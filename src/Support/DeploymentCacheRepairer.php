@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Codegenie\ConfigCacheGuard\Support;
 
+use Illuminate\Container\Container;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Throwable;
 
 final class DeploymentCacheRepairer
 {
+    public const ROUTE_CACHE_REPAIRED_ATTRIBUTE = 'codegenie_config_cache_guard_route_cache_repaired';
+
     /**
      * @param  null|callable(string): int  $artisanCall
      */
@@ -104,6 +108,8 @@ final class DeploymentCacheRepairer
                     self::invalidateOpcache($routeCachePath);
                 }
 
+                self::markRouteCacheRepairedForCurrentRequest();
+
                 return true;
             }
         } catch (Throwable) {
@@ -165,5 +171,22 @@ final class DeploymentCacheRepairer
         if (function_exists('opcache_invalidate')) {
             @opcache_invalidate($path, true);
         }
+    }
+
+    public static function routeCacheWasRepairedFor(Request $request): bool
+    {
+        return $request->attributes->get(self::ROUTE_CACHE_REPAIRED_ATTRIBUTE) === true;
+    }
+
+    private static function markRouteCacheRepairedForCurrentRequest(): void
+    {
+        $container = Container::getInstance();
+
+        if (! $container->bound('request')) {
+            return;
+        }
+
+        $request = $container->make('request');
+        $request->attributes->set(self::ROUTE_CACHE_REPAIRED_ATTRIBUTE, true);
     }
 }

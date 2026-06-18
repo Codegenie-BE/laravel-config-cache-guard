@@ -164,6 +164,37 @@ it('does not create route cache when no cached route file exists', function (): 
     }
 });
 
+it('keeps stale route cache while queued auto repair can rebuild after Laravel boots', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachedRoutePath = $basePath.'/bootstrap/cache/routes-v7.php';
+        $pendingPath = $basePath.'/bootstrap/cache/route-cache-refresh.pending';
+        $failedPath = $basePath.'/bootstrap/cache/route-cache-refresh.failed';
+
+        file_put_contents($cachedRoutePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=false');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=true');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
+        $contents = (string) file_get_contents($pendingPath);
+
+        expect(is_file($cachedRoutePath))->toBeTrue();
+        expect(is_file($failedPath))->toBeFalse();
+        expect($contents)->toContain('Codegenie Laravel Config Cache Guard pending auto repair');
+        expect($contents)->toContain('reason=artisan_command_failed');
+        expect($contents)->toContain('Artisan::call()');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
 it('writes a safe pending marker when pre-bootstrap config rebuild cannot run', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
