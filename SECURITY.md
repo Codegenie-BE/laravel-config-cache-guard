@@ -2,23 +2,30 @@
 
 ## Supported versions
 
-The latest stable version receives security fixes.
+Security updates are provided for the latest stable release of `codegenie-be/laravel-config-cache-guard`.
 
 ## Reporting a vulnerability
 
-Please report security issues privately before opening any public issue.
+Please do not report security vulnerabilities through public GitHub issues.
 
-Use GitHub private vulnerability reporting when it is enabled for this repository, or contact Codegenie through the official contact details on the Codegenie website.
+Report security issues privately through GitHub Security Advisories or by contacting Codegenie directly through the contact details on:
 
-Do not include secrets, tokens, passwords, cookies, authorization headers, `.env` values or customer data in reports.
+https://www.codegenie.be
 
 ## Security design
 
-This package is intentionally small and file-based:
+This package is intentionally small and avoids external services.
 
-- it does not read `.env` values;
-- it does not store secrets;
-- it does not send data to external services;
-- it does not use a database, Redis, queues, workers or cron;
-- it runs a fixed `php artisan config:cache` command only when a metadata signature changed;
-- shell paths are escaped and no user input is passed to the shell.
+- It does not read `.env` values.
+- It does not store secrets.
+- It does not log tokens, command output or environment values.
+- It does not use Redis, queues, cron, workers or a database.
+- Automatic pre-bootstrap rebuild commands are fixed to `config:cache` and `route:cache`.
+- Shell paths are escaped when `exec()` is available.
+- If automatic rebuilding fails, stale cache files are removed and a safe diagnostic marker is written.
+- The optional repair endpoint requires `CONFIG_CACHE_GUARD_REPAIR_TOKEN`.
+- Invalid repair tokens return `404` to avoid confirming endpoint availability.
+- GET repair requests are disabled by default because URLs can be stored in browser history or logs.
+- The repair endpoint does not expose `.env` values, tokens, secrets or command output.
+
+Keep `CONFIG_CACHE_GUARD_REPAIR_TOKEN` long, random and private. Rotate it if it was ever shared, logged or exposed.

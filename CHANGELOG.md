@@ -1,15 +1,29 @@
 # Changelog
 
-All notable changes to this package will be documented in this file.
+All notable changes to `codegenie-be/laravel-config-cache-guard` will be documented in this file.
 
-## v1.0.0 - 2026-06-17
+## v1.2.0 - Unreleased
+
+- Added a protected repair endpoint at `/_config-cache-guard/repair`.
+- The repair endpoint can rebuild Laravel config and route cache through `Artisan::call()` without using `exec()`.
+- Added `CONFIG_CACHE_GUARD_REPAIR_TOKEN` for protected repair requests.
+- Added `CONFIG_CACHE_GUARD_REPAIR_ALLOW_GET` for shared-hosting browser-based repairs when POST is not practical.
+- Added `CONFIG_CACHE_GUARD_FAIL_HARD` for visible safe 503 errors when automatic pre-bootstrap refresh fails.
+- Added safe diagnostic contents to `.failed` marker files instead of empty marker files.
+- Added `php artisan config-cache-guard:status --clear-failures`.
+- Updated status diagnostics with repair endpoint visibility.
+- Updated documentation for shared hosting without `exec()`.
+
+## v1.1.0
+
+- Added optional route cache freshness guarding.
+- Added route cache metadata signatures.
+- Added route cache lock and failure marker handling.
+- Updated documentation for route cache behavior.
+
+## v1.0.0
 
 - Initial release.
 - Added pre-bootstrap config cache guard.
-- Added automatic stale config cache detection based on safe file metadata.
-- Added lock-protected `php artisan config:cache` refresh flow.
-- Added fallback behavior that removes stale cached config when refresh is unavailable or fails.
-- Added install command.
-- Added status command with production-readiness diagnostics.
-- Added GitHub Actions test matrix for Laravel 12 and 13.
-- Added tests for installation, idempotency, dry-run behavior, status command and runtime fallback behavior.
+- Added installer command.
+- Added status command.
