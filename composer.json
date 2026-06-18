@@ -1,6 +1,6 @@
 {
     "name": "codegenie-be/laravel-config-cache-guard",
-    "description": "Prevent Laravel from running with stale cached configuration after .env or config file changes. Built for shared hosting, FTP deployments and simple production apps.",
+    "description": "Prevent Laravel from running with stale cached configuration or routes after .env, config or route changes, with a protected repair endpoint for shared hosting without exec().",
     "type": "library",
     "license": "MIT",
     "homepage": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
@@ -8,15 +8,23 @@
         "laravel",
         "laravel-config",
         "laravel-config-cache",
+        "laravel-route-cache",
         "config-cache",
+        "route-cache",
         "config-cache-guard",
         "stale-config",
+        "stale-routes",
+        "stale-cache",
         "deployment",
+        "deployment-cache",
         "shared-hosting",
         "ftp-deployment",
         "artisan",
         "env",
         "php",
+        "repair-endpoint",
+        "exec-disabled",
+        "artisan-call",
         "codegenie"
     ],
     "authors": [
@@ -35,6 +43,7 @@
         "illuminate/support": "^12.0|^13.0"
     },
     "require-dev": {
+        "larastan/larastan": "^3.10",
         "laravel/pint": "^1.0",
         "orchestra/testbench": "^10.0|^11.0",
         "pestphp/pest": "^3.0|^4.0"
@@ -57,9 +66,10 @@
         }
     },
     "scripts": {
-        "test": "pest",
+        "analyse": "phpstan analyse --memory-limit=512M",
         "format": "pint",
-        "format:test": "pint --test"
+        "format:test": "pint --test",
+        "test": "pest"
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
