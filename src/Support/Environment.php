@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace Codegenie\ConfigCacheGuard\Support;
 
+use Illuminate\Support\Env;
+
 final class Environment
 {
     public static function flag(string $name, bool $default = true): bool
     {
         $value = self::string($name);
 
-        if ($value === null || $value === '') {
+        if ($value === null) {
             return $default;
         }
 
@@ -31,12 +33,10 @@ final class Environment
             }
         }
 
-        if (function_exists('env')) {
-            $envValue = env($name);
+        $envValue = Env::get($name);
 
-            if (is_string($envValue) && $envValue !== '') {
-                return $envValue;
-            }
+        if (is_string($envValue) && $envValue !== '') {
+            return $envValue;
         }
 
         return null;

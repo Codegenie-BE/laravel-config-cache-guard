@@ -64,6 +64,9 @@ final class DeploymentCacheSignatures
         @file_put_contents($path, $signature, LOCK_EX);
     }
 
+    /**
+     * @return list<string>
+     */
     private static function envFiles(string $basePath): array
     {
         $files = [];
@@ -86,6 +89,9 @@ final class DeploymentCacheSignatures
         return $files;
     }
 
+    /**
+     * @return list<string>
+     */
     private static function collectPhpFiles(string $directory): array
     {
         if (! is_dir($directory)) {
@@ -115,11 +121,15 @@ final class DeploymentCacheSignatures
         return $files;
     }
 
+    /**
+     * @param  list<string>  $files
+     * @param  list<string>  $values
+     */
     private static function build(string $basePath, array $files, array $values = []): ?string
     {
         $files = array_values(array_unique(array_filter(
             $files,
-            static fn (mixed $file): bool => is_string($file) && is_file($file)
+            static fn (string $file): bool => is_file($file)
         )));
 
         if ($files === [] && $values === []) {
@@ -140,10 +150,10 @@ final class DeploymentCacheSignatures
 
             $parts[] = implode('|', [
                 str_starts_with($file, $basePath.'/') ? str_replace($basePath.'/', '', $file) : $file,
-                (string) ($stats['mtime'] ?? 0),
-                (string) ($stats['ctime'] ?? 0),
-                (string) ($stats['size'] ?? 0),
-                (string) ($stats['ino'] ?? 0),
+                (string) $stats['mtime'],
+                (string) $stats['ctime'],
+                (string) $stats['size'],
+                (string) $stats['ino'],
             ]);
         }
 

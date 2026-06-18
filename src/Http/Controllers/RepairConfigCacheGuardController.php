@@ -9,12 +9,17 @@ use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Artisan;
 use Throwable;
 
+/**
+ * @phpstan-type RepairResult array{ok: bool, status: string, message: string}
+ * @phpstan-type RepairPayload array{ok: bool, message: string, results?: array<string, RepairResult>}
+ */
 final class RepairConfigCacheGuardController
 {
-    public function __invoke(Request $request): JsonResponse|string
+    public function __invoke(Request $request): JsonResponse|Response
     {
         $token = Environment::string('CONFIG_CACHE_GUARD_REPAIR_TOKEN');
 
@@ -22,9 +27,7 @@ final class RepairConfigCacheGuardController
             return $this->notFound($request);
         }
 
-        $providedToken = $request->headers->get('X-Config-Cache-Guard-Token')
-            ?: (string) $request->query('token', '')
-            ?: (string) $request->input('token', '');
+        $providedToken = $request->headers->get('X-Config-Cache-Guard-Token') ?: $this->requestString($request, 'token');
 
         if ($providedToken === '' || ! hash_equals($token, $providedToken)) {
             return $this->notFound($request);
@@ -39,6 +42,7 @@ final class RepairConfigCacheGuardController
 
         $basePath = base_path();
         $cachePath = $basePath.'/bootstrap/cache';
+        /** @var array<string, RepairResult> $results */
         $results = [];
 
         if (Environment::flag('CONFIG_CACHE_GUARD_CONFIG')) {
@@ -61,7 +65,7 @@ final class RepairConfigCacheGuardController
             ];
         }
 
-        $ok = collect($results)->every(static fn (array $result): bool => (bool) ($result['ok'] ?? false));
+        $ok = collect($results)->every(static fn (array $result): bool => $result['ok']);
 
         return $this->respond($request, $ok ? 200 : 500, [
             'ok' => $ok,
@@ -72,6 +76,9 @@ final class RepairConfigCacheGuardController
         ]);
     }
 
+    /**
+     * @return RepairResult
+     */
     private function repairConfigCache(string $basePath, string $cachePath): array
     {
         try {
@@ -117,6 +124,9 @@ final class RepairConfigCacheGuardController
         ];
     }
 
+    /**
+     * @return RepairResult
+     */
     private function repairRouteCache(string $basePath, string $cachePath): array
     {
         try {
@@ -172,7 +182,7 @@ final class RepairConfigCacheGuardController
             return false;
         }
 
-        if ((string) $request->query('routes', '') === '1' || (string) $request->input('routes', '') === '1') {
+        if ($this->requestString($request, 'routes') === '1') {
             return true;
         }
 
@@ -180,12 +190,15 @@ final class RepairConfigCacheGuardController
             || is_file($cachePath.'/route-cache-refresh.failed');
     }
 
+    /**
+     * @return list<string>
+     */
     private function routeCachePaths(string $cachePath): array
     {
         return glob($cachePath.'/routes-*.php') ?: [];
     }
 
-    private function notFound(Request $request): JsonResponse|string
+    private function notFound(Request $request): JsonResponse|Response
     {
         return $this->respond($request, 404, [
             'ok' => false,
@@ -193,7 +206,10 @@ final class RepairConfigCacheGuardController
         ]);
     }
 
-    private function respond(Request $request, int $status, array $payload): JsonResponse|string
+    /**
+     * @param  RepairPayload  $payload
+     */
+    private function respond(Request $request, int $status, array $payload): JsonResponse|Response
     {
         if ($request->expectsJson()) {
             return response()->json($payload, $status);
@@ -203,19 +219,18 @@ final class RepairConfigCacheGuardController
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
+    /**
+     * @param  RepairPayload  $payload
+     */
     private function html(array $payload): string
     {
-        $ok = (bool) ($payload['ok'] ?? false);
+        $ok = $payload['ok'];
         $title = $ok ? 'Config Cache Guard repair completed' : 'Config Cache Guard repair issue';
-        $message = htmlspecialchars((string) ($payload['message'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $message = htmlspecialchars($payload['message'], ENT_QUOTES, 'UTF-8');
         $rows = '';
 
         foreach (($payload['results'] ?? []) as $target => $result) {
-            if (! is_array($result)) {
-                continue;
-            }
-
-            $rows .= '<tr><th>'.htmlspecialchars((string) $target, ENT_QUOTES, 'UTF-8').'</th><td>'.htmlspecialchars((string) ($result['status'] ?? 'unknown'), ENT_QUOTES, 'UTF-8').'</td><td>'.htmlspecialchars((string) ($result['message'] ?? ''), ENT_QUOTES, 'UTF-8').'</td></tr>';
+            $rows .= '<tr><th>'.htmlspecialchars((string) $target, ENT_QUOTES, 'UTF-8').'</th><td>'.htmlspecialchars($result['status'], ENT_QUOTES, 'UTF-8').'</td><td>'.htmlspecialchars($result['message'], ENT_QUOTES, 'UTF-8').'</td></tr>';
         }
 
         $table = $rows !== ''
@@ -223,5 +238,16 @@ final class RepairConfigCacheGuardController
             : '';
 
         return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>'.htmlspecialchars($title, ENT_QUOTES, 'UTF-8').'</title><style>body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:760px;margin:48px auto;padding:0 20px;line-height:1.6;color:#172033}code{background:#f3f4f6;padding:2px 5px;border-radius:4px}table{border-collapse:collapse;width:100%;margin-top:20px}th,td{border:1px solid #d7dce3;padding:10px;text-align:left;vertical-align:top}th{background:#f8fafc}</style></head><body><h1>'.htmlspecialchars($title, ENT_QUOTES, 'UTF-8').'</h1><p>'.$message.'</p>'.$table.'<p><strong>Security note:</strong> no .env values, secrets, tokens or command output are shown.</p></body></html>';
+    }
+
+    private function requestString(Request $request, string $key): string
+    {
+        foreach ([$request->query($key), $request->input($key)] as $value) {
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
     }
 }

@@ -135,6 +135,9 @@ final class StatusConfigCacheGuardCommand extends Command
         return $seconds > 0 ? $seconds : 60;
     }
 
+    /**
+     * @return list<string>
+     */
     private function routeCachePaths(string $cachePath): array
     {
         return glob($cachePath.'/routes-*.php') ?: [];
@@ -156,7 +159,7 @@ final class StatusConfigCacheGuardCommand extends Command
 
     private function resolvePhpBinary(): ?string
     {
-        $candidates = array_filter([
+        $candidates = [
             Environment::string('CONFIG_CACHE_GUARD_PHP_BINARY'),
             Environment::string('PHP_CLI_BINARY'),
             '/usr/local/bin/php',
@@ -166,10 +169,10 @@ final class StatusConfigCacheGuardCommand extends Command
             '/opt/alt/php83/usr/bin/php',
             '/opt/alt/php82/usr/bin/php',
             PHP_BINARY,
-        ]);
+        ];
 
         foreach ($candidates as $candidate) {
-            if (! is_string($candidate) || $candidate === '') {
+            if ($candidate === null) {
                 continue;
             }
 

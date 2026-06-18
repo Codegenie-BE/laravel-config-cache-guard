@@ -2,7 +2,24 @@
 
 declare(strict_types=1);
 
+/**
+ * @phpstan-type GuardTarget array{
+ *     artisan_command: string,
+ *     cached_files: callable(): list<string>,
+ *     create_when_missing: bool,
+ *     failed_path: string,
+ *     fail_on_recent_failure?: bool,
+ *     lock_path: string,
+ *     name: string,
+ *     signature_path: string,
+ *     source_files: callable(): list<string>,
+ *     source_values?: callable(): list<string>
+ * }
+ */
 (static function (): void {
+    /**
+     * @return non-empty-string|null
+     */
     $envString = static function (string $name): ?string {
         $value = getenv($name);
 
@@ -22,7 +39,7 @@ declare(strict_types=1);
     $envFlagEnabled = static function (string $name, bool $default = true) use ($envString): bool {
         $value = $envString($name);
 
-        if ($value === null || $value === '') {
+        if ($value === null) {
             return $default;
         }
 
@@ -49,6 +66,9 @@ declare(strict_types=1);
 
     $failHard = $envFlagEnabled('CONFIG_CACHE_GUARD_FAIL_HARD', false);
 
+    /**
+     * @return list<string>
+     */
     $collectPhpFiles = static function (string $directory): array {
         if (! is_dir($directory)) {
             return [];
@@ -77,6 +97,9 @@ declare(strict_types=1);
         return $files;
     };
 
+    /**
+     * @return list<string>
+     */
     $envFiles = static function () use ($basePath, $envString): array {
         $files = [];
         $envPath = $basePath.'/.env';
@@ -99,10 +122,25 @@ declare(strict_types=1);
     };
 
     $buildSignature = static function (array $files, array $values = []) use ($basePath): ?string {
-        $files = array_values(array_unique(array_filter(
-            $files,
-            static fn (mixed $file): bool => is_string($file) && is_file($file)
-        )));
+        $validFiles = [];
+
+        foreach ($files as $file) {
+            if (is_string($file) && is_file($file)) {
+                $validFiles[] = $file;
+            }
+        }
+
+        $files = array_values(array_unique($validFiles));
+
+        $validValues = [];
+
+        foreach ($values as $value) {
+            if (is_string($value)) {
+                $validValues[] = $value;
+            }
+        }
+
+        $values = array_values(array_unique($validValues));
 
         if ($files === [] && $values === []) {
             return null;
@@ -122,10 +160,10 @@ declare(strict_types=1);
 
             $parts[] = implode('|', [
                 str_starts_with($file, $basePath.'/') ? str_replace($basePath.'/', '', $file) : $file,
-                (string) ($stats['mtime'] ?? 0),
-                (string) ($stats['ctime'] ?? 0),
-                (string) ($stats['size'] ?? 0),
-                (string) ($stats['ino'] ?? 0),
+                (string) $stats['mtime'],
+                (string) $stats['ctime'],
+                (string) $stats['size'],
+                (string) $stats['ino'],
             ]);
         }
 
@@ -217,11 +255,11 @@ declare(strict_types=1);
         exit;
     };
 
-    $fail = static function (array $target, string $reason, string $message, string $action) use ($writeFailureMarker, $showFailure, $failHard): void {
-        $writeFailureMarker($target['failed_path'], $target['name'], $reason, $message, $action);
+    $fail = static function (string $failedPath, string $name, string $reason, string $message, string $action) use ($writeFailureMarker, $showFailure, $failHard): void {
+        $writeFailureMarker($failedPath, $name, $reason, $message, $action);
 
         if ($failHard) {
-            $showFailure($target['name'], $reason, $message, $action);
+            $showFailure($name, $reason, $message, $action);
         }
     };
 
@@ -249,7 +287,7 @@ declare(strict_types=1);
     };
 
     $resolvePhpBinary = static function () use ($envString): ?string {
-        $candidates = array_filter([
+        $candidates = [
             $envString('CONFIG_CACHE_GUARD_PHP_BINARY'),
             $envString('PHP_CLI_BINARY'),
             '/usr/local/bin/php',
@@ -259,10 +297,10 @@ declare(strict_types=1);
             '/opt/alt/php83/usr/bin/php',
             '/opt/alt/php82/usr/bin/php',
             PHP_BINARY,
-        ]);
+        ];
 
         foreach ($candidates as $candidate) {
-            if (! is_string($candidate) || $candidate === '') {
+            if ($candidate === null) {
                 continue;
             }
 
@@ -300,6 +338,12 @@ declare(strict_types=1);
         return $exitCode === 0;
     };
 
+    $arrayFromCallback = static function (callable $callback): array {
+        $values = $callback();
+
+        return is_array($values) ? $values : [];
+    };
+
     $refreshDeploymentCache = static function (array $target) use (
         $buildSignature,
         $readSignature,
@@ -311,38 +355,63 @@ declare(strict_types=1);
         $canUseExec,
         $resolvePhpBinary,
         $runArtisan,
+        $arrayFromCallback,
         $failureCooldownSeconds,
         $fail
     ): void {
-        $sourceFiles = is_callable($target['source_files']) ? $target['source_files']() : [];
-        $sourceValues = is_callable($target['source_values'] ?? null) ? $target['source_values']() : [];
+        $artisanCommand = $target['artisan_command'] ?? null;
+        $cachedFilesCallback = $target['cached_files'] ?? null;
+        $createWhenMissing = ($target['create_when_missing'] ?? false) === true;
+        $failedPath = $target['failed_path'] ?? null;
+        $failOnRecentFailure = ($target['fail_on_recent_failure'] ?? true) !== false;
+        $lockPath = $target['lock_path'] ?? null;
+        $name = $target['name'] ?? null;
+        $signaturePath = $target['signature_path'] ?? null;
+        $sourceFilesCallback = $target['source_files'] ?? null;
+        $sourceValuesCallback = $target['source_values'] ?? null;
+
+        if (
+            ! is_string($artisanCommand)
+            || ! is_callable($cachedFilesCallback)
+            || ! is_string($failedPath)
+            || ! is_string($lockPath)
+            || ! is_string($name)
+            || ! is_string($signaturePath)
+            || ! is_callable($sourceFilesCallback)
+        ) {
+            return;
+        }
+
+        $sourceFiles = $arrayFromCallback($sourceFilesCallback);
+        $sourceValues = is_callable($sourceValuesCallback) ? $arrayFromCallback($sourceValuesCallback) : [];
         $currentSignature = $buildSignature($sourceFiles, $sourceValues);
 
         if ($currentSignature === null) {
             return;
         }
 
-        $cachedFiles = is_callable($target['cached_files']) ? $target['cached_files']() : [];
+        $cachedFiles = $arrayFromCallback($cachedFilesCallback);
         $targetCacheExists = $cacheExists($cachedFiles);
 
-        if (! $targetCacheExists && ! ($target['create_when_missing'] ?? false)) {
+        if (! $targetCacheExists && ! $createWhenMissing) {
             return;
         }
 
-        $storedSignature = $readSignature($target['signature_path']);
+        $storedSignature = $readSignature($signaturePath);
 
         if ($storedSignature === $currentSignature && $targetCacheExists) {
             return;
         }
 
-        if ($isRecentlyFailed($target['failed_path'], $failureCooldownSeconds)) {
+        if ($isRecentlyFailed($failedPath, $failureCooldownSeconds)) {
             $removeCachedFiles($cachedFiles);
 
-            if ($target['fail_on_recent_failure'] ?? true) {
+            if ($failOnRecentFailure) {
                 $fail(
-                    $target,
+                    $failedPath,
+                    $name,
                     'recent_failure_cooldown',
-                    'Automatic '.$target['name'].' cache refresh recently failed and is waiting before retrying.',
+                    'Automatic '.$name.' cache refresh recently failed and is waiting before retrying.',
                     'Use the protected repair endpoint or fix the hosting environment before retrying.'
                 );
             }
@@ -350,7 +419,7 @@ declare(strict_types=1);
             return;
         }
 
-        $lock = @fopen($target['lock_path'], 'c');
+        $lock = @fopen($lockPath, 'c');
 
         if ($lock === false) {
             return;
@@ -363,22 +432,22 @@ declare(strict_types=1);
 
             clearstatcache();
 
-            $sourceFiles = is_callable($target['source_files']) ? $target['source_files']() : [];
-            $sourceValues = is_callable($target['source_values'] ?? null) ? $target['source_values']() : [];
+            $sourceFiles = $arrayFromCallback($sourceFilesCallback);
+            $sourceValues = is_callable($sourceValuesCallback) ? $arrayFromCallback($sourceValuesCallback) : [];
             $currentSignature = $buildSignature($sourceFiles, $sourceValues);
 
             if ($currentSignature === null) {
                 return;
             }
 
-            $cachedFiles = is_callable($target['cached_files']) ? $target['cached_files']() : [];
+            $cachedFiles = $arrayFromCallback($cachedFilesCallback);
             $targetCacheExists = $cacheExists($cachedFiles);
 
-            if (! $targetCacheExists && ! ($target['create_when_missing'] ?? false)) {
+            if (! $targetCacheExists && ! $createWhenMissing) {
                 return;
             }
 
-            $storedSignature = $readSignature($target['signature_path']);
+            $storedSignature = $readSignature($signaturePath);
 
             if ($storedSignature === $currentSignature && $targetCacheExists) {
                 return;
@@ -387,9 +456,10 @@ declare(strict_types=1);
             if (! $canUseExec()) {
                 $removeCachedFiles($cachedFiles);
                 $fail(
-                    $target,
+                    $failedPath,
+                    $name,
                     'exec_disabled',
-                    'Automatic '.$target['name'].' cache refresh cannot run because PHP exec() is unavailable or disabled on this hosting account.',
+                    'Automatic '.$name.' cache refresh cannot run because PHP exec() is unavailable or disabled on this hosting account.',
                     'Ask your hosting provider to enable exec(), or use the protected repair endpoint to rebuild through Laravel without exec().'
                 );
 
@@ -401,22 +471,23 @@ declare(strict_types=1);
             if ($phpBinary === null) {
                 $removeCachedFiles($cachedFiles);
                 $fail(
-                    $target,
+                    $failedPath,
+                    $name,
                     'php_cli_not_found',
-                    'Automatic '.$target['name'].' cache refresh cannot run because no PHP CLI binary was found.',
+                    'Automatic '.$name.' cache refresh cannot run because no PHP CLI binary was found.',
                     'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or use the protected repair endpoint.'
                 );
 
                 return;
             }
 
-            $rebuilt = $runArtisan($target['artisan_command'], $phpBinary);
-            $cachedFiles = is_callable($target['cached_files']) ? $target['cached_files']() : [];
+            $rebuilt = $runArtisan($artisanCommand, $phpBinary);
+            $cachedFiles = $arrayFromCallback($cachedFilesCallback);
             $targetCacheExists = $cacheExists($cachedFiles);
 
             if ($rebuilt && $targetCacheExists) {
-                $writeSignature($target['signature_path'], $currentSignature);
-                @unlink($target['failed_path']);
+                $writeSignature($signaturePath, $currentSignature);
+                @unlink($failedPath);
 
                 foreach ($cachedFiles as $cachedFile) {
                     if (is_string($cachedFile)) {
@@ -430,9 +501,10 @@ declare(strict_types=1);
 
             $removeCachedFiles($cachedFiles);
             $fail(
-                $target,
+                $failedPath,
+                $name,
                 'artisan_command_failed',
-                'The '.$target['artisan_command'].' command did not complete successfully.',
+                'The '.$artisanCommand.' command did not complete successfully.',
                 'Run the command manually, check whether it works in this application, or use the protected repair endpoint.'
             );
         } finally {
