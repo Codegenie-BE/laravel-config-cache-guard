@@ -9,10 +9,10 @@ declare(strict_types=1);
  * avoids Laravel classes so it can safely remove stale deployment cache files
  * before Laravel has a chance to load them.
  */
-(static function (): void {
-    $composerAutoloadPath = isset($_composer_autoload_path) && is_string($_composer_autoload_path)
-        ? $_composer_autoload_path
-        : null;
+$definedVariables = get_defined_vars();
+$composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
+
+(static function (?string $composerAutoloadPath): void {
 
     /**
      * @return non-empty-string|null
@@ -48,12 +48,18 @@ declare(strict_types=1);
     }
 
     $loadedKey = realpath(__FILE__) ?: __FILE__;
+    $loadedGuards = $GLOBALS['__codegenie_config_cache_guard_loaded'] ?? [];
 
-    if (($GLOBALS['__codegenie_config_cache_guard_loaded'][$loadedKey] ?? false) === true) {
+    if (! is_array($loadedGuards)) {
+        $loadedGuards = [];
+    }
+
+    if (($loadedGuards[$loadedKey] ?? false) === true) {
         return;
     }
 
-    $GLOBALS['__codegenie_config_cache_guard_loaded'][$loadedKey] = true;
+    $loadedGuards[$loadedKey] = true;
+    $GLOBALS['__codegenie_config_cache_guard_loaded'] = $loadedGuards;
 
     if (! $envFlagEnabled('CONFIG_CACHE_GUARD_ENABLED')) {
         return;
@@ -84,7 +90,7 @@ declare(strict_types=1);
 
         $cwd = getcwd();
 
-        if (is_string($cwd) && $cwd !== '') {
+        if ($cwd !== false) {
             $candidates[] = $cwd;
 
             if (basename($cwd) === 'public') {
@@ -93,11 +99,11 @@ declare(strict_types=1);
         }
 
         foreach (array_unique($candidates) as $candidate) {
-            if (! is_string($candidate) || $candidate === '') {
+            $candidate = rtrim($candidate, DIRECTORY_SEPARATOR);
+
+            if ($candidate === '') {
                 continue;
             }
-
-            $candidate = rtrim($candidate, DIRECTORY_SEPARATOR);
 
             if (
                 is_dir($candidate.'/bootstrap/cache')
@@ -673,4 +679,4 @@ declare(strict_types=1);
             ]);
         }
     }
-})();
+})(is_string($composerAutoloadPath) ? $composerAutoloadPath : null);
