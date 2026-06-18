@@ -215,6 +215,7 @@ Pre-bootstrap options should preferably be real server environment variables bec
 | `CONFIG_CACHE_GUARD_ROUTES` | `true` | Set to `false`, `0`, `off` or `no` to disable route cache guarding only. |
 | `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE` | `false` | Set to `true` to let the guard create `bootstrap/cache/config.php` even when no config cache exists yet. |
 | `CONFIG_CACHE_GUARD_AUTO_REPAIR` | `true` | Allows the service provider to process pending repair markers through `Artisan::call()` after Laravel boots. |
+| `CONFIG_CACHE_GUARD_AUTO_REFRESH` | `true` | Redirects normal GET/HEAD browser requests once after a successful route-cache auto repair, so the browser immediately reloads against the refreshed route cache. |
 | `CONFIG_CACHE_GUARD_FAILURE_COOLDOWN` | `60` | Number of seconds to wait after a failed rebuild before trying again. |
 | `CONFIG_CACHE_GUARD_FAIL_HARD` | `false` | Show a safe 503 error page when pre-bootstrap refresh cannot continue. Leave this `false` when you want in-app auto repair to run automatically. |
 | `CONFIG_CACHE_GUARD_PHP_BINARY` | auto-detect | Optional full path to the PHP CLI binary. |
