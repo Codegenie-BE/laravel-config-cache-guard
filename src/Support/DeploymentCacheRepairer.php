@@ -93,9 +93,9 @@ final class DeploymentCacheRepairer
     {
         try {
             $exitCode = $artisanCall('route:cache');
-            $routeCachePaths = self::routeCachePaths($cachePath);
+            $routeCachePath = RouteCacheFiles::current($cachePath);
 
-            if ($exitCode === 0 && $routeCachePaths !== []) {
+            if ($exitCode === 0 && is_file($routeCachePath)) {
                 DeploymentCacheSignatures::write(
                     $cachePath.'/route-source.signature',
                     DeploymentCacheSignatures::routes($basePath)
@@ -103,10 +103,8 @@ final class DeploymentCacheRepairer
 
                 @unlink($cachePath.'/route-cache-refresh.pending');
                 @unlink($cachePath.'/route-cache-refresh.failed');
-
-                foreach ($routeCachePaths as $routeCachePath) {
-                    self::invalidateOpcache($routeCachePath);
-                }
+                self::invalidateOpcache($routeCachePath);
+                RouteCacheFiles::removeStale($cachePath);
 
                 self::markRouteCacheRepairedForCurrentRequest();
 
@@ -116,9 +114,7 @@ final class DeploymentCacheRepairer
             // A safe diagnostic marker is written below. Command output and exception details are intentionally not exposed.
         }
 
-        foreach (self::routeCachePaths($cachePath) as $routeCachePath) {
-            @unlink($routeCachePath);
-        }
+        @unlink(RouteCacheFiles::current($cachePath));
 
         @unlink($cachePath.'/route-cache-refresh.pending');
 
@@ -154,14 +150,6 @@ final class DeploymentCacheRepairer
             flock($lock, LOCK_UN);
             fclose($lock);
         }
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function routeCachePaths(string $cachePath): array
-    {
-        return glob($cachePath.'/routes-*.php') ?: [];
     }
 
     private static function invalidateOpcache(string $path): void

@@ -47,16 +47,23 @@ function removeGuardRuntimeProject(string $path): void
 
 function resetGuardRuntimeEnvironment(): void
 {
-    putenv('CONFIG_CACHE_GUARD_ENABLED');
-    putenv('CONFIG_CACHE_GUARD_CONFIG');
-    putenv('CONFIG_CACHE_GUARD_ROUTES');
-    putenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN');
-    putenv('CONFIG_CACHE_GUARD_PHP_BINARY');
-    putenv('CONFIG_CACHE_GUARD_FAIL_HARD');
-    putenv('CONFIG_CACHE_GUARD_AUTO_REPAIR');
-    putenv('CONFIG_CACHE_GUARD_ALLOW_CLI');
-    putenv('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE');
-    putenv('PHP_CLI_BINARY');
+    foreach ([
+        'CONFIG_CACHE_GUARD_ENABLED',
+        'CONFIG_CACHE_GUARD_CONFIG',
+        'CONFIG_CACHE_GUARD_ROUTES',
+        'CONFIG_CACHE_GUARD_FAILURE_COOLDOWN',
+        'CONFIG_CACHE_GUARD_PHP_BINARY',
+        'CONFIG_CACHE_GUARD_FAIL_HARD',
+        'CONFIG_CACHE_GUARD_AUTO_REPAIR',
+        'CONFIG_CACHE_GUARD_ALLOW_CLI',
+        'CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE',
+        'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
+        'APP_ROUTES_CACHE',
+        'PHP_CLI_BINARY',
+    ] as $name) {
+        putenv($name);
+        unset($_ENV[$name], $_SERVER[$name]);
+    }
 }
 
 it('does nothing when the guard is disabled', function (): void {
@@ -116,7 +123,8 @@ it('removes stale cached routes during the route failure cooldown', function ():
 
         include $guardPath;
 
-        expect(is_file($cachedRoutePath))->toBeFalse();
+        expect(is_file($cachedRoutePath))->toBeTrue();
+        expect(getenv('APP_ROUTES_CACHE'))->toBeString();
         expect((string) file_get_contents($failedPath))->toContain('reason=recent_failure_cooldown');
     } finally {
         resetGuardRuntimeEnvironment();
@@ -189,6 +197,60 @@ it('keeps stale route cache while queued auto repair can rebuild after Laravel b
         expect($contents)->toContain('Codegenie Laravel Config Cache Guard pending auto repair');
         expect($contents)->toContain('reason=artisan_command_failed');
         expect($contents)->toContain('Artisan::call()');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('points Laravel at a versioned route cache path when cached routes become stale', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $staleRoutePath = $basePath.'/bootstrap/cache/routes-v7.php';
+        $pendingPath = $basePath.'/bootstrap/cache/route-cache-refresh.pending';
+
+        file_put_contents($staleRoutePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=false');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=true');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
+        $routeCachePath = getenv('APP_ROUTES_CACHE');
+
+        expect($routeCachePath)->toBeString();
+        expect($routeCachePath)->toStartWith('bootstrap/cache/routes-');
+        expect($routeCachePath)->not->toBe('bootstrap/cache/routes-v7.php');
+        expect(is_file($staleRoutePath))->toBeTrue();
+        expect(is_file($pendingPath))->toBeTrue();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('can keep the legacy route cache path when versioned route cache files are disabled', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $staleRoutePath = $basePath.'/bootstrap/cache/routes-v7.php';
+
+        file_put_contents($staleRoutePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=false');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=true');
+        putenv('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE=false');
+        putenv('CONFIG_CACHE_GUARD_PHP_BINARY=/definitely/missing/php');
+
+        include $guardPath;
+
+        expect(getenv('APP_ROUTES_CACHE'))->toBeFalse();
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
