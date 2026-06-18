@@ -82,6 +82,39 @@ it('repairs pending config cache through a callable without exec', function (): 
     }
 });
 
+it('defers pending repairs until the application terminates', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+
+    try {
+        file_put_contents($cachePath.'/config-cache-refresh.pending', "target=config\nreason=exec_disabled\n");
+
+        $calls = [];
+        $callable = static function (string $command) use (&$calls, $cachePath): int {
+            $calls[] = $command;
+
+            if ($command === 'config:cache') {
+                file_put_contents($cachePath.'/config.php', '<?php return [];');
+            }
+
+            return 0;
+        };
+
+        DeploymentCacheRepairer::runPendingAfterResponse($this->app, $basePath, $cachePath, $callable);
+
+        expect($calls)->toBe([]);
+        expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeTrue();
+
+        $this->app->terminate();
+
+        expect($calls)->toBe(['config:cache']);
+        expect(is_file($cachePath.'/config.php'))->toBeTrue();
+        expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
 it('writes a safe failure marker when pending config repair fails', function (): void {
     $basePath = makeRepairerRuntimeProject();
     $cachePath = $basePath.'/bootstrap/cache';

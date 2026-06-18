@@ -173,7 +173,7 @@ it('does not create route cache when no cached route file exists', function (): 
     }
 });
 
-it('keeps stale route cache while queued auto repair can rebuild after Laravel boots', function (): void {
+it('keeps stale route cache while queued auto repair can rebuild after the response', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
     try {
@@ -234,7 +234,7 @@ it('points Laravel at a versioned route cache path when cached routes become sta
     }
 });
 
-it('can keep the legacy route cache path when versioned route cache files are disabled', function (): void {
+it('removes the stale legacy route cache when versioned route cache files are disabled', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
     try {
@@ -252,6 +252,8 @@ it('can keep the legacy route cache path when versioned route cache files are di
         include $guardPath;
 
         expect(getenv('APP_ROUTES_CACHE'))->toBeFalse();
+        expect(is_file($staleRoutePath))->toBeFalse();
+        expect(is_file($basePath.'/bootstrap/cache/route-cache-refresh.pending'))->toBeTrue();
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
@@ -285,7 +287,7 @@ it('clears a guard-managed route cache path when versioned route cache files are
     }
 });
 
-it('respects an explicit custom route cache path', function (): void {
+it('bypasses a stale explicit custom route cache path until pending repair rebuilds it', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
     try {
@@ -305,7 +307,7 @@ it('respects an explicit custom route cache path', function (): void {
 
         expect(getenv('APP_ROUTES_CACHE'))->toBe('bootstrap/cache/custom-routes.php');
         expect(getenv('CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE'))->toBeFalse();
-        expect(is_file($customRoutePath))->toBeTrue();
+        expect(is_file($customRoutePath))->toBeFalse();
         expect(is_file($pendingPath))->toBeTrue();
     } finally {
         resetGuardRuntimeEnvironment();

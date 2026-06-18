@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Codegenie\ConfigCacheGuard\Support;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Throwable;
@@ -12,6 +13,16 @@ use Throwable;
 final class DeploymentCacheRepairer
 {
     public const ROUTE_CACHE_REPAIRED_ATTRIBUTE = 'codegenie_config_cache_guard_route_cache_repaired';
+
+    /**
+     * @param  null|callable(string): int  $artisanCall
+     */
+    public static function runPendingAfterResponse(Application $app, string $basePath, string $cachePath, ?callable $artisanCall = null): void
+    {
+        $app->terminating(static function () use ($basePath, $cachePath, $artisanCall): void {
+            self::runPending($basePath, $cachePath, $artisanCall);
+        });
+    }
 
     /**
      * @param  null|callable(string): int  $artisanCall
