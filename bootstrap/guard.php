@@ -329,6 +329,23 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         );
     };
 
+    $writeSuccessMarker = static function (string $path, string $target, string $cacheFile, ?string $sourceSignature, int $cleanedStaleFiles = 0): void {
+        @file_put_contents(
+            $path,
+            implode(PHP_EOL, array_filter([
+                'Codegenie Laravel Config Cache Guard success',
+                'generated_at='.gmdate('c'),
+                'target='.$target,
+                'cache_file='.$cacheFile,
+                $sourceSignature === null ? null : 'source_signature='.$sourceSignature,
+                'cleaned_stale_files='.$cleanedStaleFiles,
+                'note=No .env values, secrets, tokens or command output are stored in this file.',
+                '',
+            ], static fn (?string $line): bool => $line !== null)),
+            LOCK_EX
+        );
+    };
+
     $showFailure = static function (string $target, string $reason, string $message, string $action): void {
         http_response_code(503);
         header('Content-Type: text/html; charset=UTF-8');
@@ -502,6 +519,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $runArtisan,
         $arrayFromCallback,
         $failureCooldownSeconds,
+        $writeSuccessMarker,
         $fail,
         $queueAutoRepairOrFail
     ): void {
@@ -667,11 +685,39 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     }
                 }
 
+                $cleanedStaleFiles = 0;
+
                 foreach ($arrayFromCallback($cleanupFilesCallback) as $cleanupFile) {
                     if (is_string($cleanupFile) && ! in_array($cleanupFile, $cachedFiles, true)) {
+                        $existed = is_file($cleanupFile);
+
                         @unlink($cleanupFile);
                         $invalidateOpcache($cleanupFile);
+
+                        if ($existed && ! is_file($cleanupFile)) {
+                            $cleanedStaleFiles++;
+                        }
                     }
+                }
+
+                $cacheFile = null;
+
+                foreach ($cachedFiles as $cachedFile) {
+                    if (is_string($cachedFile)) {
+                        $cacheFile = $cachedFile;
+
+                        break;
+                    }
+                }
+
+                if ($cacheFile !== null) {
+                    $writeSuccessMarker(
+                        dirname($signaturePath).DIRECTORY_SEPARATOR.$name.'-cache-refresh.succeeded',
+                        $name,
+                        $cacheFile,
+                        $currentSignature,
+                        $cleanedStaleFiles
+                    );
                 }
 
                 return;

@@ -8,6 +8,7 @@ use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
 use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
+use Codegenie\ConfigCacheGuard\Support\SuccessMarker;
 use Illuminate\Console\Command;
 
 final class StatusConfigCacheGuardCommand extends Command
@@ -24,9 +25,11 @@ final class StatusConfigCacheGuardCommand extends Command
         $configSignaturePath = $cachePath.'/config-source.signature';
         $configFailedPath = $cachePath.'/config-cache-refresh.failed';
         $configPendingPath = $cachePath.'/config-cache-refresh.pending';
+        $configSucceededPath = $cachePath.'/config-cache-refresh.succeeded';
         $routeSignaturePath = $cachePath.'/route-source.signature';
         $routeFailedPath = $cachePath.'/route-cache-refresh.failed';
         $routePendingPath = $cachePath.'/route-cache-refresh.pending';
+        $routeSucceededPath = $cachePath.'/route-cache-refresh.succeeded';
         $routeCachePaths = $this->routeCachePaths($cachePath);
 
         if ($this->option('clear-failures')) {
@@ -70,16 +73,20 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Fail hard', $failHard ? 'yes' : 'no'],
             ['bootstrap/cache path', $cachePath],
             ['bootstrap/cache writable', $cacheWritable ? 'yes' : 'no'],
+            ['current config cache path', $cachedConfigPath],
             ['cached config exists', is_file($cachedConfigPath) ? 'yes' : 'no'],
             ['config signature exists', is_file($configSignaturePath) ? 'yes' : 'no'],
             ['config pending repair', FailureMarker::summary($configPendingPath) ?? 'no'],
             ['config failed marker', FailureMarker::summary($configFailedPath) ?? 'no'],
+            ['config last successful repair', SuccessMarker::summary($configSucceededPath) ?? 'no'],
             ['cached routes exist', $routeCachePaths === [] ? 'no' : 'yes ('.count($routeCachePaths).')'],
             ['current route cache path', $currentRouteCachePath],
             ['current route cache exists', is_file($currentRouteCachePath) ? 'yes' : 'no'],
             ['route signature exists', is_file($routeSignaturePath) ? 'yes' : 'no'],
             ['route pending repair', FailureMarker::summary($routePendingPath) ?? 'no'],
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
+            ['route last successful repair', SuccessMarker::summary($routeSucceededPath) ?? 'no'],
+            ['route stale cleanup last result', SuccessMarker::staleCleanupSummary($routeSucceededPath) ?? 'no'],
             ['exec available', $execAvailable ? 'yes' : 'no'],
             ['PHP CLI binary', $phpBinary ?? 'not found'],
         ]);

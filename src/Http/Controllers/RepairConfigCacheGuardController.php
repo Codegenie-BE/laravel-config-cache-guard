@@ -8,6 +8,7 @@ use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
 use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
+use Codegenie\ConfigCacheGuard\Support\SuccessMarker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -87,9 +88,11 @@ final class RepairConfigCacheGuardController
             $configCachePath = $cachePath.'/config.php';
 
             if ($exitCode === 0 && is_file($configCachePath)) {
+                $signature = DeploymentCacheSignatures::config($basePath);
+
                 DeploymentCacheSignatures::write(
                     $cachePath.'/config-source.signature',
-                    DeploymentCacheSignatures::config($basePath)
+                    $signature
                 );
 
                 @unlink($cachePath.'/config-cache-refresh.failed');
@@ -97,6 +100,13 @@ final class RepairConfigCacheGuardController
                 if (function_exists('opcache_invalidate')) {
                     @opcache_invalidate($configCachePath, true);
                 }
+
+                SuccessMarker::write(
+                    $cachePath.'/config-cache-refresh.succeeded',
+                    'config',
+                    $configCachePath,
+                    $signature
+                );
 
                 return [
                     'ok' => true,
@@ -135,14 +145,23 @@ final class RepairConfigCacheGuardController
             $routeCachePath = RouteCacheFiles::current($cachePath);
 
             if ($exitCode === 0 && is_file($routeCachePath)) {
+                $signature = DeploymentCacheSignatures::routes($basePath);
+
                 DeploymentCacheSignatures::write(
                     $cachePath.'/route-source.signature',
-                    DeploymentCacheSignatures::routes($basePath)
+                    $signature
                 );
 
                 @unlink($cachePath.'/route-cache-refresh.failed');
                 $this->invalidateOpcache($routeCachePath);
-                RouteCacheFiles::removeStale($cachePath);
+                $cleanedFiles = RouteCacheFiles::removeStale($cachePath);
+                SuccessMarker::write(
+                    $cachePath.'/route-cache-refresh.succeeded',
+                    'route',
+                    $routeCachePath,
+                    $signature,
+                    $cleanedFiles
+                );
 
                 return [
                     'ok' => true,

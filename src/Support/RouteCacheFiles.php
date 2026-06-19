@@ -57,12 +57,22 @@ final class RouteCacheFiles
         ));
     }
 
-    public static function removeStale(string $cachePath): void
+    public static function removeStale(string $cachePath): int
     {
+        $removed = 0;
+
         foreach (self::stale($cachePath) as $path) {
+            $existed = is_file($path);
+
             @unlink($path);
             self::invalidateOpcache($path);
+
+            if ($existed && ! is_file($path)) {
+                $removed++;
+            }
         }
+
+        return $removed;
     }
 
     private static function resolveConfiguredPath(string $path, string $cachePath): string

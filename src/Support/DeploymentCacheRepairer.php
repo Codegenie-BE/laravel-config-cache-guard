@@ -68,14 +68,22 @@ final class DeploymentCacheRepairer
             $configCachePath = $cachePath.'/config.php';
 
             if ($exitCode === 0 && is_file($configCachePath)) {
+                $signature = DeploymentCacheSignatures::config($basePath);
+
                 DeploymentCacheSignatures::write(
                     $cachePath.'/config-source.signature',
-                    DeploymentCacheSignatures::config($basePath)
+                    $signature
                 );
 
                 @unlink($cachePath.'/config-cache-refresh.pending');
                 @unlink($cachePath.'/config-cache-refresh.failed');
                 self::invalidateOpcache($configCachePath);
+                SuccessMarker::write(
+                    $cachePath.'/config-cache-refresh.succeeded',
+                    'config',
+                    $configCachePath,
+                    $signature
+                );
 
                 return true;
             }
@@ -107,15 +115,24 @@ final class DeploymentCacheRepairer
             $routeCachePath = RouteCacheFiles::current($cachePath);
 
             if ($exitCode === 0 && is_file($routeCachePath)) {
+                $signature = DeploymentCacheSignatures::routes($basePath);
+
                 DeploymentCacheSignatures::write(
                     $cachePath.'/route-source.signature',
-                    DeploymentCacheSignatures::routes($basePath)
+                    $signature
                 );
 
                 @unlink($cachePath.'/route-cache-refresh.pending');
                 @unlink($cachePath.'/route-cache-refresh.failed');
                 self::invalidateOpcache($routeCachePath);
-                RouteCacheFiles::removeStale($cachePath);
+                $cleanedFiles = RouteCacheFiles::removeStale($cachePath);
+                SuccessMarker::write(
+                    $cachePath.'/route-cache-refresh.succeeded',
+                    'route',
+                    $routeCachePath,
+                    $signature,
+                    $cleanedFiles
+                );
 
                 self::markRouteCacheRepairedForCurrentRequest();
 
