@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheRepairer;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\View;
 
 function makeRepairerRuntimeProject(): string
 {
@@ -77,6 +79,61 @@ it('repairs pending config cache through a callable without exec', function (): 
         expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
         expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
         expect(is_file($cachePath.'/config-cache-refresh.failed'))->toBeFalse();
+        expect((string) file_get_contents($cachePath.'/config-cache-refresh.succeeded'))->toContain('target=config');
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('renders web views with shared errors before deferred repair runs', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+
+    try {
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('a', 32))]);
+
+        mkdir($basePath.'/resources/views', 0777, true);
+        file_put_contents(
+            $basePath.'/resources/views/guard-errors-regression.blade.php',
+            '@if($errors->any()) errors @else ok @endif'
+        );
+        file_put_contents($cachePath.'/config-cache-refresh.pending', "target=config\nreason=exec_disabled\n");
+
+        View::addLocation($basePath.'/resources/views');
+
+        $calls = [];
+        $uri = '/guard-errors-regression-'.bin2hex(random_bytes(4));
+
+        Route::middleware('web')->get($uri, static function () use (&$calls) {
+            expect($calls)->toBe([]);
+
+            return view('guard-errors-regression');
+        });
+
+        DeploymentCacheRepairer::runPendingAfterResponse(
+            $this->app,
+            $basePath,
+            $cachePath,
+            static function (string $command) use (&$calls, $cachePath): int {
+                $calls[] = $command;
+
+                if ($command === 'config:cache') {
+                    file_put_contents($cachePath.'/config.php', '<?php return [];');
+                }
+
+                return 0;
+            }
+        );
+
+        $this->get($uri)
+            ->assertOk()
+            ->assertSeeText('ok');
+
+        if ($calls === []) {
+            $this->app->terminate();
+        }
+
+        expect($calls)->toBe(['config:cache']);
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -200,6 +257,7 @@ it('repairs pending route cache into the configured current route cache file', f
         expect(is_file($cachePath.'/route-source.signature'))->toBeTrue();
         expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
         expect(is_file($cachePath.'/route-cache-refresh.failed'))->toBeFalse();
+        expect((string) file_get_contents($cachePath.'/route-cache-refresh.succeeded'))->toContain('cleaned_stale_files=1');
     } finally {
         removeRepairerRuntimeProject($basePath);
     }

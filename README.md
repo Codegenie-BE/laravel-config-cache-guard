@@ -174,6 +174,9 @@ This checks:
 - whether the config and route signature files exist
 - whether pending repair markers exist and why
 - whether failed-rebuild markers exist and why
+- when config and route cache repair last succeeded
+- which active cache files are currently expected
+- how many stale route cache files were cleaned during the last successful route repair
 - whether `exec()` is available
 - which PHP CLI binary will be used
 
@@ -266,11 +269,13 @@ The guard may create or update these files inside `bootstrap/cache`:
 | `config-cache-refresh.lock` | File lock to avoid concurrent config cache rebuilds. |
 | `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback. |
 | `config-cache-refresh.failed` | Safe diagnostic marker after a failed config rebuild attempt. |
+| `config-cache-refresh.succeeded` | Safe diagnostic marker after a successful config rebuild. |
 | `routes-*.php` | Laravel's cached routes, created by `php artisan route:cache`. |
 | `route-source.signature` | Metadata signature of route source files. |
 | `route-cache-refresh.lock` | File lock to avoid concurrent route cache rebuilds. |
 | `route-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback. |
 | `route-cache-refresh.failed` | Safe diagnostic marker after a failed route rebuild attempt. |
+| `route-cache-refresh.succeeded` | Safe diagnostic marker after a successful route rebuild, including stale route cleanup count. |
 
 ## Failure behavior
 
