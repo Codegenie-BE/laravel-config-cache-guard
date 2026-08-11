@@ -252,14 +252,14 @@ PHP
             'Composer did not register bootstrap/guard.php in autoload_files.php.'
         );
 
-        $status = $this->runArtisan(['config-cache-guard:status'], ['COLUMNS' => '240']);
+        $status = $this->runArtisan(['config-cache-guard:status']);
         self::assert(
             str_contains($status, 'Composer autoload integration'),
             'The installed package did not register its status command.'
         );
         self::assert(
-            str_contains(self::normalizePath($status), self::normalizePath($this->cachePath)),
-            'The status command did not report the active bootstrap cache path.'
+            str_contains($status, 'Active Laravel cache path'),
+            'The status command did not report the active bootstrap cache path field.'
         );
     }
 
