@@ -4,6 +4,10 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+- Added a Composer distribution gate that builds the release archive, verifies every runtime file and rejects leaked development, documentation or vendor files.
+- Disabled Composer's five-minute process timeout only for the real Laravel E2E script, so `composer check:release` can complete reliably on slower machines without weakening other command timeouts.
+- Added a Windows Laravel 13 E2E job so both supported Laravel majors are exercised on Linux and Windows.
+
 ## v1.3.1 - 2026-08-11
 
 - Added real application end-to-end tests that install the package through Composer into fresh Laravel 12 and 13 projects.
