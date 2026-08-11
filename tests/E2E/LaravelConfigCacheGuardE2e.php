@@ -252,7 +252,7 @@ PHP
             'Composer did not register bootstrap/guard.php in autoload_files.php.'
         );
 
-        $status = $this->runArtisan(['config-cache-guard:status']);
+        $status = $this->runArtisan(['config-cache-guard:status'], ['COLUMNS' => '240']);
         self::assert(
             str_contains($status, 'Composer autoload integration'),
             'The installed package did not register its status command.'
