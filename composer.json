@@ -70,6 +70,17 @@
     },
     "scripts": {
         "analyse": "phpstan analyse --memory-limit=512M",
+        "check": [
+            "@check:composer",
+            "@check:security",
+            "@check:autoload",
+            "@format:test",
+            "@analyse",
+            "@test"
+        ],
+        "check:autoload": "@composer dump-autoload --optimize --strict-psr --no-interaction",
+        "check:composer": "@composer validate --strict",
+        "check:security": "@composer audit --no-interaction",
         "format": "pint",
         "format:test": "pint --test",
         "test": "pest"
@@ -81,5 +92,15 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true
         }
+    },
+    "scripts-descriptions": {
+        "analyse": "Run PHPStan at the configured maximum level.",
+        "check": "Run every local quality gate in the same order as CI.",
+        "check:autoload": "Generate an optimized autoloader and enforce strict PSR mappings.",
+        "check:composer": "Validate composer.json and lock-file consistency strictly.",
+        "check:security": "Audit the resolved dependency set for known security advisories.",
+        "format": "Apply Laravel Pint formatting.",
+        "format:test": "Check Laravel Pint formatting without changing files.",
+        "test": "Run the Pest test suite."
     }
 }

@@ -20,41 +20,101 @@ final class DeploymentCacheSignatures
             return null;
         }
 
-        $files = self::collectPhpFiles($configDir);
-
-        foreach (self::envFiles($basePath) as $envFile) {
-            $files[] = $envFile;
-        }
+        $files = array_merge(
+            self::collectPhpFiles($configDir),
+            self::deploymentSourceFiles($basePath),
+            self::envFiles($basePath)
+        );
 
         return self::build($basePath, $files);
     }
 
     public static function routes(string $basePath): ?string
     {
-        $files = self::collectPhpFiles($basePath.'/routes');
-        foreach ([
-            $basePath.'/bootstrap/app.php',
-            $basePath.'/app/Providers/RouteServiceProvider.php',
-        ] as $routeSourceFile) {
-            if (is_file($routeSourceFile)) {
-                $files[] = $routeSourceFile;
-            }
-        }
-
-        foreach (self::envFiles($basePath) as $envFile) {
-            $files[] = $envFile;
-        }
+        $files = array_merge(
+            self::collectPhpFiles($basePath.'/config'),
+            self::collectPhpFiles($basePath.'/routes'),
+            self::deploymentSourceFiles($basePath),
+            self::envFiles($basePath)
+        );
 
         return self::build($basePath, $files);
     }
 
-    public static function write(string $path, ?string $signature): void
+    public static function write(string $path, ?string $signature): bool
     {
         if ($signature === null) {
-            return;
+            return false;
         }
 
-        @file_put_contents($path, $signature, LOCK_EX);
+        $directory = dirname($path);
+
+        if (! is_dir($directory)) {
+            return false;
+        }
+
+        $temporaryPath = @tempnam($directory, '.config-cache-guard-');
+
+        if ($temporaryPath === false) {
+            return false;
+        }
+
+        try {
+            $written = @file_put_contents($temporaryPath, $signature, LOCK_EX);
+
+            if ($written !== strlen($signature)) {
+                return false;
+            }
+
+            if (! @rename($temporaryPath, $path)) {
+                if (is_file($path) && ! @unlink($path)) {
+                    return false;
+                }
+
+                if (! @rename($temporaryPath, $path)) {
+                    return false;
+                }
+            }
+
+            clearstatcache(true, $path);
+            $storedSignature = @file_get_contents($path);
+
+            return is_string($storedSignature) && hash_equals($signature, $storedSignature);
+        } finally {
+            if (is_file($temporaryPath)) {
+                @unlink($temporaryPath);
+            }
+        }
+    }
+
+    private static function bootstrapPath(string $basePath): string
+    {
+        $basePath = rtrim($basePath, '/\\');
+        $laravelPath = $basePath.'/.laravel';
+
+        return is_dir($laravelPath) ? $laravelPath : $basePath.'/bootstrap';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function deploymentSourceFiles(string $basePath): array
+    {
+        $files = self::collectPhpFiles($basePath.'/app/Providers');
+        $bootstrapPath = self::bootstrapPath($basePath);
+
+        foreach ([
+            $basePath.'/composer.json',
+            $basePath.'/composer.lock',
+            $bootstrapPath.'/app.php',
+            $bootstrapPath.'/providers.php',
+        ] as $sourceFile) {
+            if (is_file($sourceFile)) {
+                $files[] = $sourceFile;
+            }
+        }
+
+        return $files;
     }
 
     /**
@@ -116,21 +176,19 @@ final class DeploymentCacheSignatures
 
     /**
      * @param  list<string>  $files
-     * @param  list<string>  $values
      */
-    private static function build(string $basePath, array $files, array $values = []): ?string
+    private static function build(string $basePath, array $files): ?string
     {
         $files = array_values(array_unique(array_filter(
             $files,
             static fn (string $file): bool => is_file($file)
         )));
 
-        if ($files === [] && $values === []) {
+        if ($files === []) {
             return null;
         }
 
         sort($files, SORT_STRING);
-        sort($values, SORT_STRING);
 
         $parts = [];
 
@@ -148,10 +206,6 @@ final class DeploymentCacheSignatures
                 (string) $stats['size'],
                 (string) $stats['ino'],
             ]);
-        }
-
-        foreach ($values as $value) {
-            $parts[] = 'value|'.$value;
         }
 
         $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';

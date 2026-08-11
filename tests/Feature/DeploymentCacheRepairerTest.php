@@ -44,14 +44,38 @@ function removeRepairerRuntimeProject(string $path): void
     @rmdir($path);
 }
 
+function setRepairerEnvironment(string $name, ?string $value): void
+{
+    if ($value === null) {
+        putenv($name);
+        unset($_ENV[$name], $_SERVER[$name]);
+    } else {
+        putenv($name.'='.$value);
+        $_ENV[$name] = $value;
+        $_SERVER[$name] = $value;
+    }
+
+    $key = '__codegenie_config_cache_guard_external_environment';
+    $capturedEnvironment = $GLOBALS[$key] ?? [];
+
+    if (! is_array($capturedEnvironment)) {
+        $capturedEnvironment = [];
+    }
+
+    $capturedEnvironment[$name] = $value;
+    $GLOBALS[$key] = $capturedEnvironment;
+}
+
 beforeEach(function (): void {
-    putenv('APP_ROUTES_CACHE');
-    unset($_ENV['APP_ROUTES_CACHE'], $_SERVER['APP_ROUTES_CACHE']);
+    foreach (['APP_CONFIG_CACHE', 'APP_ROUTES_CACHE'] as $name) {
+        setRepairerEnvironment($name, null);
+    }
 });
 
 afterEach(function (): void {
-    putenv('APP_ROUTES_CACHE');
-    unset($_ENV['APP_ROUTES_CACHE'], $_SERVER['APP_ROUTES_CACHE']);
+    foreach (['APP_CONFIG_CACHE', 'APP_ROUTES_CACHE'] as $name) {
+        setRepairerEnvironment($name, null);
+    }
 });
 
 it('repairs pending config cache through a callable without exec', function (): void {
@@ -80,6 +104,105 @@ it('repairs pending config cache through a callable without exec', function (): 
         expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
         expect(is_file($cachePath.'/config-cache-refresh.failed'))->toBeFalse();
         expect((string) file_get_contents($cachePath.'/config-cache-refresh.succeeded'))->toContain('target=config');
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('removes rebuilt config when its source signature cannot be persisted', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+
+    try {
+        mkdir($cachePath.'/config-source.signature');
+        file_put_contents(
+            $cachePath.'/config-cache-refresh.pending',
+            "target=config\nreason=exec_disabled\nsource_signature=".str_repeat('b', 32)."\n"
+        );
+
+        DeploymentCacheRepairer::runPending(
+            $basePath,
+            $cachePath,
+            static function (string $command) use ($cachePath): int {
+                if ($command === 'config:cache') {
+                    file_put_contents($cachePath.'/config.php', '<?php return [];');
+                }
+
+                return 0;
+            }
+        );
+
+        expect(is_file($cachePath.'/config.php'))->toBeFalse();
+        expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
+        expect((string) file_get_contents($cachePath.'/config-cache-refresh.failed'))
+            ->toContain('reason=signature_write_failed');
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('persists the exact pre-bootstrap source signature after deferred repair', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+    $sourceSignature = str_repeat('a', 32);
+
+    try {
+        file_put_contents(
+            $cachePath.'/config-cache-refresh.pending',
+            "target=config\nreason=exec_disabled\nsource_signature={$sourceSignature}\n"
+        );
+
+        DeploymentCacheRepairer::runPending(
+            $basePath,
+            $cachePath,
+            static function (string $command) use ($cachePath): int {
+                if ($command === 'config:cache') {
+                    file_put_contents($cachePath.'/config.php', '<?php return [];');
+                }
+
+                return 0;
+            }
+        );
+
+        expect((string) file_get_contents($cachePath.'/config-source.signature'))
+            ->toBe($sourceSignature);
+        expect((string) file_get_contents($cachePath.'/config-cache-refresh.succeeded'))
+            ->toContain('source_signature='.$sourceSignature);
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('repairs pending config cache into a configured custom cache file', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+
+    try {
+        $customConfigPath = $basePath.'/storage/framework/custom-config.php';
+
+        setRepairerEnvironment('APP_CONFIG_CACHE', 'storage/framework/custom-config.php');
+        file_put_contents($cachePath.'/config-cache-refresh.pending', "target=config\nreason=exec_disabled\n");
+
+        $calls = [];
+        $callable = static function (string $command) use (&$calls, $customConfigPath): int {
+            $calls[] = $command;
+
+            if ($command === 'config:cache') {
+                file_put_contents($customConfigPath, '<?php return [];');
+            }
+
+            return 0;
+        };
+
+        DeploymentCacheRepairer::runPending($basePath, $cachePath, $callable);
+
+        expect($calls)->toBe(['config:cache']);
+        expect(is_file($customConfigPath))->toBeTrue();
+        expect(is_file($cachePath.'/config.php'))->toBeFalse();
+        expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
+        expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
+        expect(normalizeTestPath((string) file_get_contents($cachePath.'/config-cache-refresh.succeeded')))
+            ->toContain('cache_file='.normalizeTestPath($customConfigPath));
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -234,7 +357,7 @@ it('repairs pending route cache into the configured current route cache file', f
         $currentRoutePath = $cachePath.'/routes-current.php';
         $staleRoutePath = $cachePath.'/routes-v7.php';
 
-        putenv('APP_ROUTES_CACHE=bootstrap/cache/routes-current.php');
+        setRepairerEnvironment('APP_ROUTES_CACHE', 'bootstrap/cache/routes-current.php');
         file_put_contents($cachePath.'/route-cache-refresh.pending', "target=route\nreason=exec_disabled\n");
         file_put_contents($staleRoutePath, '<?php return [];');
 
@@ -271,7 +394,7 @@ it('repairs pending route cache into a custom route cache file outside the defau
         $currentRoutePath = $basePath.'/storage/framework/custom-routes.php';
         $staleRoutePath = $cachePath.'/routes-v7.php';
 
-        putenv('APP_ROUTES_CACHE=storage/framework/custom-routes.php');
+        setRepairerEnvironment('APP_ROUTES_CACHE', 'storage/framework/custom-routes.php');
         file_put_contents($cachePath.'/route-cache-refresh.pending', "target=route\nreason=exec_disabled\n");
         file_put_contents($staleRoutePath, '<?php return [];');
 

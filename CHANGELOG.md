@@ -2,7 +2,7 @@
 
 All notable changes to `codegenie-be/laravel-config-cache-guard` will be documented in this file.
 
-## v1.2.0 - Unreleased
+## v1.3.0 - 2026-08-11
 
 - Load the pre-bootstrap guard automatically through Composer `autoload.files`.
 - Removed the need to add a manual require line to `public/index.php` for new installations.
@@ -14,9 +14,32 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Added `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE`, disabled by default, so the package does not force config caching on projects that are not already using it.
 - Added pending repair markers for shared hosting environments where `exec()` or a PHP CLI binary is unavailable.
 - The service provider now processes pending config and route repairs through Laravel's own `Artisan::call()` after Laravel boots uncached.
-- Removed the public `/_config-cache-guard/repair` route, repair controller and repair token environment options.
+- Removed the public `/_config-cache-guard/repair` route, controller, registration and repair-token environment options.
 - Updated status diagnostics to show Composer autoload integration, legacy require detection, pending repair markers and auto repair state.
 - Updated documentation for the no-token, no-public-route shared-hosting fallback.
+- Removed the unreachable auto-refresh middleware and its unused `CONFIG_CACHE_GUARD_AUTO_REFRESH` option; deferred repair completes after the response and cannot refresh that same request.
+- Added support for Laravel's configured `APP_CONFIG_CACHE` path when it is available before Composer loads.
+- Added support for Laravel 13 projects that use `.laravel/cache` as the active bootstrap cache directory.
+- Made stale-cache removal fail closed: requests stop safely when a known-stale cache file cannot be removed.
+- Added explicit handling for unavailable lock files and failed pending-marker writes.
+- Fixed failure cooldown behavior so traffic no longer rewrites the marker timestamp and postpones retries indefinitely. Expired failed repairs are retried even when the stale cache file was already removed.
+- Updated status diagnostics with active cache paths and config-cache writability.
+- Added regression coverage for custom config paths, `.laravel/cache`, lock failures, cooldown expiry and unremovable stale cache.
+- Pending repair markers now retain the exact pre-bootstrap source signature, preventing signature drift after Laravel loads `.env` and avoiding repeated repair loops.
+- Expanded deployment signatures to include config-dependent route registration, application providers, active bootstrap registration files and Composer dependency metadata.
+- Deferred repair now rechecks the pending marker after acquiring its lock to avoid duplicate cache rebuilds during concurrent request termination.
+- Fail-hard diagnostics now throw a normal runtime exception in explicit CLI guard mode instead of emitting an HTML response.
+- Captured documented guard controls and cache paths before Laravel dotenv bootstrap so status diagnostics and deferred repair cannot drift from pre-bootstrap behavior.
+- Source signatures are now written atomically and verified; a rebuilt cache is removed or bypassed when its signature cannot be persisted safely, preventing repeated untracked rebuild loops.
+- Added regression coverage for pre-/post-bootstrap environment consistency and failed signature persistence.
+- Updated the development lock file to a security-clean dependency set resolved on the lowest supported PHP 8.2 / Laravel 12 platform, while retaining separately validated Laravel 13 compatibility.
+- Fixed the remaining Pint and PHPStan findings in the pre-bootstrap guard, deferred repair locking flow and regression tests.
+- Added regression coverage proving that route repair cooldown requests preserve the existing failure marker and timestamp instead of extending the cooldown.
+- Added a CI quality gate for optimized Composer autoload generation with strict PSR validation.
+- Made path assertions platform-independent so the Pest suite treats Windows and Unix separator styles as equivalent.
+- Made pre-bootstrap Artisan execution cross-platform by invoking the absolute `artisan` path instead of relying on shell-specific `cd &&` syntax.
+- Added a focused Windows CI job to catch filesystem and path-separator regressions on the lowest supported PHP/Laravel combination.
+- Added reusable Composer quality scripts, including `composer check`, so local and CI validation use the same commands.
 
 ## v1.1.0
 

@@ -49,3 +49,31 @@ it('shows successful repair metadata in the status command', function (): void {
         }
     }
 });
+
+it('warns when a custom config cache path requires pre-bootstrap environment configuration', function (): void {
+    $key = '__codegenie_config_cache_guard_external_environment';
+    $originalSnapshotExists = array_key_exists($key, $GLOBALS);
+    $originalSnapshot = $GLOBALS[$key] ?? null;
+    $capturedEnvironment = is_array($originalSnapshot) ? $originalSnapshot : [];
+
+    try {
+        putenv('APP_CONFIG_CACHE=storage/framework/custom-config.php');
+        $_ENV['APP_CONFIG_CACHE'] = 'storage/framework/custom-config.php';
+        $_SERVER['APP_CONFIG_CACHE'] = 'storage/framework/custom-config.php';
+        $capturedEnvironment['APP_CONFIG_CACHE'] = 'storage/framework/custom-config.php';
+        $GLOBALS[$key] = $capturedEnvironment;
+
+        $this->artisan('config-cache-guard:status')
+            ->expectsOutputToContain('a custom config cache path is active')
+            ->assertExitCode(0);
+    } finally {
+        putenv('APP_CONFIG_CACHE');
+        unset($_ENV['APP_CONFIG_CACHE'], $_SERVER['APP_CONFIG_CACHE']);
+
+        if ($originalSnapshotExists) {
+            $GLOBALS[$key] = $originalSnapshot;
+        } else {
+            unset($GLOBALS[$key]);
+        }
+    }
+});

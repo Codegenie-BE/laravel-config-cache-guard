@@ -9,7 +9,7 @@
 
 **by [Codegenie](https://www.codegenie.be)**
 
-Prevent Laravel from running with stale cached configuration or stale cached routes after `.env`, `config/*.php` or `routes/*.php` changes.
+Prevent Laravel from running with stale cached configuration or stale cached routes after environment, configuration, route, provider or dependency changes.
 
 Built for Laravel 12 and 13 apps on shared hosting, FTP deployments and simple production setups where `php artisan config:cache` or `php artisan route:cache` can accidentally be forgotten.
 
@@ -26,19 +26,19 @@ No `public/index.php` change is required. The guard is loaded automatically by C
 
 ## Why this exists
 
-Laravel can cache configuration into:
+Laravel normally caches configuration into:
 
 ```text
 bootstrap/cache/config.php
 ```
 
-Laravel can also cache routes into files such as:
+Laravel 13 can use `.laravel/cache` as its active bootstrap cache directory, and Laravel also supports an explicit `APP_CONFIG_CACHE` path. Routes are normally cached in files such as:
 
 ```text
 bootstrap/cache/routes-v7.php
 ```
 
-Those caches are good for production performance, but they also mean changes in `.env`, `config/*.php` or `routes/*.php` are not reflected until the relevant cache is rebuilt.
+Those caches are good for production performance, but relevant deployment changes are not reflected until the appropriate cache is rebuilt. This includes changes to `.env`, configuration, routes, application providers, bootstrap registration and installed dependency metadata.
 
 This is easy to forget on shared hosting, FTP deployments or hosting panels where deploy hooks are limited. This package checks whether source metadata changed before Laravel bootstraps. If it changed, it prevents Laravel from using stale deployment cache and tries to rebuild safely.
 
@@ -50,14 +50,15 @@ On normal HTTP requests, the guard performs small metadata checks against:
 
 - `.env`
 - `.env.{APP_ENV}` when `APP_ENV` is provided as a real server environment variable
-- `config/**/*.php` when config cache guarding is active
+- `config/**/*.php` when config cache guarding is active, and also for route signatures because route registration can depend on configuration
 - `routes/**/*.php` when a route cache file already exists
-- `bootstrap/app.php` when it exists, because modern Laravel apps often register routes there
-- `app/Providers/RouteServiceProvider.php` when it exists
+- `app/Providers/**/*.php`
+- the active bootstrap `app.php` and `providers.php` files (`bootstrap/*` or `.laravel/*`) when they exist
+- `composer.json` and `composer.lock` when present, so dependency or package-discovery changes invalidate deployment caches
 
 It only checks file metadata such as timestamps, file size and inode metadata. It does not read or store secret values.
 
-By default, config cache guarding refreshes an existing `bootstrap/cache/config.php` file. It does not force config caching on projects that are not using config cache. You can opt into creating config cache when missing with `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
+By default, config cache guarding refreshes the existing config cache in Laravel's active bootstrap cache directory. It also supports an explicit `APP_CONFIG_CACHE` path when that path is available as a real process or server environment variable before Composer loads. It does not force config caching on projects that are not using config cache. You can opt into creating config cache when missing with `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
 
 When the config signature changed and config cache exists, the guard takes a file lock and tries:
 
@@ -71,7 +72,7 @@ When the route signature changed and a route cache file already exists, the guar
 php artisan route:cache
 ```
 
-If pre-bootstrap rebuilding cannot run because `exec()` or a PHP CLI binary is unavailable, stale config cache is removed and stale route cache is bypassed with a signature-based route cache path. An internal pending marker is written, then the service provider processes that marker with `Artisan::call()` after the current HTTP response is sent.
+If pre-bootstrap rebuilding cannot run because `exec()` or a PHP CLI binary is unavailable, stale config cache is removed and stale route cache is bypassed with a signature-based route cache path. An internal pending marker records the exact pre-bootstrap source signature, then the service provider processes that marker with `Artisan::call()` after the current HTTP response is sent. This prevents the deferred layer from registering a different signature after Laravel has loaded `.env`.
 
 ## What it does not do
 
@@ -152,6 +153,8 @@ A dry run is available:
 php artisan config-cache-guard:install --remove-legacy --dry-run
 ```
 
+When updating a source checkout or replacing this repository from a ZIP file, replace it in a clean directory instead of extracting over the previous tree. An overlay cannot remove files that were deleted by a newer release. Run `composer install` and regenerate the optimized autoloader after the clean replacement.
+
 ## Status check
 
 ```bash
@@ -168,7 +171,8 @@ This checks:
 - whether the in-app auto repair fallback is enabled
 - which failure cooldown is configured
 - whether fail-hard mode is enabled
-- whether `bootstrap/cache` is writable
+- which Laravel bootstrap cache directory is active and whether it is writable
+- which config cache path is active and whether it is writable
 - whether cached config exists
 - whether cached routes exist
 - whether the config and route signature files exist
@@ -190,7 +194,8 @@ php artisan config-cache-guard:status --clear-failures
 
 - PHP 8.2 or higher
 - Laravel 12 or 13
-- A writable `bootstrap/cache` directory
+- A writable active Laravel bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`)
+- A writable configured config cache file or parent directory when `APP_CONFIG_CACHE` points elsewhere
 - Optional: `exec()` and a working PHP CLI binary for pre-bootstrap rebuilding
 
 When `exec()` is unavailable, the in-app auto repair fallback can still rebuild through `Artisan::call()` after the current response is sent.
@@ -211,27 +216,29 @@ Useful references:
 
 ## Environment options
 
-Pre-bootstrap options should preferably be real server environment variables because the guard runs before Laravel bootstraps.
+The pre-bootstrap guard runs before Laravel loads `.env`. Therefore every `CONFIG_CACHE_GUARD_*` override, `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` and `APP_ENV` value that must affect the guard **must be configured as a real process or server environment variable**. Putting such an override only in `.env` is too late for pre-bootstrap detection. Default package behavior does not require extra variables.
+
+At Composer load time, the guard keeps an in-memory snapshot of only these named control and cache-path variables. The status command and deferred repair layer use that same pre-bootstrap snapshot, so a value that appears later through Laravel's dotenv bootstrap cannot silently change guard behavior halfway through the request. Values supplied by the process or web server before Composer loads are preserved for the whole request.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CONFIG_CACHE_GUARD_ENABLED` | `true` | Set to `false`, `0`, `off` or `no` to disable the entire guard. |
 | `CONFIG_CACHE_GUARD_CONFIG` | `true` | Set to `false`, `0`, `off` or `no` to disable config cache guarding only. |
 | `CONFIG_CACHE_GUARD_ROUTES` | `true` | Set to `false`, `0`, `off` or `no` to disable route cache guarding only. |
-| `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE` | `false` | Set to `true` to let the guard create `bootstrap/cache/config.php` even when no config cache exists yet. |
+| `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE` | `false` | Set to `true` to let the guard create Laravel's configured config cache even when no config cache exists yet. |
 | `CONFIG_CACHE_GUARD_AUTO_REPAIR` | `true` | Allows the service provider to process pending repair markers through `Artisan::call()` after the current HTTP response is sent. |
-| `CONFIG_CACHE_GUARD_AUTO_REFRESH` | `true` | Redirects normal GET/HEAD browser requests if a route repair was completed before dispatch. In the default deferred repair flow, the current request already runs without stale route cache. |
 | `CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE` | `true` | Stores refreshed route caches in a signature-based `routes-*.php` file and sets `APP_ROUTES_CACHE` before Laravel boots. This avoids stale opcache reads of `routes-v7.php` on shared hosting. |
 | `CONFIG_CACHE_GUARD_FAILURE_COOLDOWN` | `60` | Number of seconds to wait after a failed rebuild before trying again. |
 | `CONFIG_CACHE_GUARD_FAIL_HARD` | `false` | Show a safe 503 error page when pre-bootstrap refresh cannot continue. Leave this `false` when you want in-app auto repair to run automatically. |
 | `CONFIG_CACHE_GUARD_PHP_BINARY` | auto-detect | Optional full path to the PHP CLI binary. |
 | `PHP_CLI_BINARY` | auto-detect | Secondary PHP CLI binary override. |
-| `APP_ROUTES_CACHE` | Laravel default | Optional Laravel route cache path override. Explicit custom paths are respected; guard-managed signature paths are only used when no custom path is configured. |
+| `APP_CONFIG_CACHE` | Laravel default | Optional config cache path override. Relative paths are resolved from the application base path. It must be externally available before Composer loads for pre-bootstrap protection. |
+| `APP_ROUTES_CACHE` | Laravel default | Optional Laravel route cache path override. Explicit custom paths are respected; guard-managed signature paths are only used when no custom path is configured. It must be externally available before Composer loads. |
 | `APP_ENV` | optional | When provided externally, `.env.{APP_ENV}` is included in metadata signatures. |
 
-Example:
+Example process/server environment configuration:
 
-```env
+```dotenv
 CONFIG_CACHE_GUARD_ENABLED=true
 CONFIG_CACHE_GUARD_CONFIG=true
 CONFIG_CACHE_GUARD_ROUTES=true
@@ -256,24 +263,24 @@ This package handles that without a public endpoint:
 7. the next request uses the refreshed cache file
 ```
 
-If the in-app repair fails, a safe `.failed` marker is written in `bootstrap/cache`. It contains a reason and suggested action, but no `.env` values, secrets, tokens or command output.
+If the in-app repair fails, a safe `.failed` marker is written in the active Laravel bootstrap cache directory. It contains a reason and suggested action, but no `.env` values, secrets, tokens or command output.
 
 ## Files written by the guard
 
-The guard may create or update these files inside `bootstrap/cache`:
+The guard may create or update these files inside Laravel's active bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`). The actual config cache file can live elsewhere when `APP_CONFIG_CACHE` is configured:
 
 | File | Purpose |
 | --- | --- |
 | `config.php` | Laravel's cached configuration, created by `php artisan config:cache`. |
-| `config-source.signature` | Metadata signature of `.env` and `config/**/*.php`. |
+| `config-source.signature` | Metadata signature of environment, config, provider, bootstrap and dependency source files. |
 | `config-cache-refresh.lock` | File lock to avoid concurrent config cache rebuilds. |
-| `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback. |
+| `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap source signature. |
 | `config-cache-refresh.failed` | Safe diagnostic marker after a failed config rebuild attempt. |
 | `config-cache-refresh.succeeded` | Safe diagnostic marker after a successful config rebuild. |
 | `routes-*.php` | Laravel's cached routes, created by `php artisan route:cache`. |
-| `route-source.signature` | Metadata signature of route source files. |
+| `route-source.signature` | Metadata signature of route, config, provider, bootstrap, environment and dependency source files. |
 | `route-cache-refresh.lock` | File lock to avoid concurrent route cache rebuilds. |
-| `route-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback. |
+| `route-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap source signature. |
 | `route-cache-refresh.failed` | Safe diagnostic marker after a failed route rebuild attempt. |
 | `route-cache-refresh.succeeded` | Safe diagnostic marker after a successful route rebuild, including stale route cleanup count. |
 
@@ -289,8 +296,11 @@ The guard may create or update these files inside `bootstrap/cache`:
 | Route rebuild needs `exec()` but `exec()` is disabled | Point Laravel at the current signature-based route cache path, keep older bypassed route cache files for cleanup, and write a pending auto repair marker. If a signature-based bypass is not possible, remove the stale route cache file so the current request loads route source files. |
 | PHP CLI is not found | Use the same pending auto repair fallback behavior for the affected cache target. |
 | Pre-bootstrap rebuild fails | Use the same pending auto repair fallback behavior for the affected cache target. |
-| In-app auto repair succeeds | Rebuild through Laravel without `exec()` after the current response is sent, update signatures and remove pending markers. |
+| In-app auto repair succeeds | Rebuild through Laravel without `exec()` after the current response is sent, atomically persist and verify the exact pre-bootstrap source signature, then remove pending markers. |
 | In-app auto repair fails | Remove stale cache file and write a safe failed marker. |
+| A rebuilt cache signature cannot be stored | Do not retain an untracked cache file. Remove or bypass it safely, write a pending or failed marker, and retry after the configured recovery path. |
+| A stale cache file cannot be removed | Stop the request with a safe 503 response instead of allowing Laravel to load known-stale cache. This safety stop applies even when normal fail-hard mode is disabled. |
+| A previous failure is still inside the cooldown | Keep the original failure marker unchanged, bypass stale cache, and retry after the configured cooldown actually expires. |
 
 Removing stale config cache files is intentional. For routes, the guard avoids stale reads by switching Laravel to a route-cache filename derived from the current route source signature. Explicit custom `APP_ROUTES_CACHE` paths are respected; if a custom route cache is stale and cannot be rebuilt before boot, the stale file is removed and rebuilt at the same custom path after the response. Running uncached for one request is slower, but safer than continuing with old configuration or old routes.
 
@@ -309,7 +319,7 @@ Then change a value in a file such as `config/app.php` or update its modified ti
 touch config/app.php
 ```
 
-Load the application once in the browser. If `exec()` and PHP CLI are available, the guard should rebuild `bootstrap/cache/config.php` and update `bootstrap/cache/config-source.signature`.
+Load the application once in the browser. If `exec()` and PHP CLI are available, the guard should rebuild the active config cache and update `config-source.signature` in the active Laravel bootstrap cache directory.
 
 If `exec()` is disabled, the first request removes the stale config cache and queues in-app auto repair after the response. A following request should use the refreshed config cache if the repair succeeded.
 
@@ -326,7 +336,7 @@ Then change a route file or update its modified time:
 touch routes/web.php
 ```
 
-Load the application once in the browser. If `exec()` and PHP CLI are available, the guard should rebuild `bootstrap/cache/routes-*.php` and update `bootstrap/cache/route-source.signature`.
+Load the application once in the browser. If `exec()` and PHP CLI are available, the guard should rebuild the active `routes-*.php` cache and update `route-source.signature` in the active Laravel bootstrap cache directory.
 
 If `exec()` is disabled, the first request points Laravel at a signature-based route cache path and queues in-app auto repair after the response. A following request should use the refreshed route cache if the repair succeeded.
 
@@ -350,9 +360,11 @@ This package protects you when those steps are forgotten, skipped or not availab
 - Pre-bootstrap rebuilding requires `exec()` and a working PHP CLI binary.
 - In-app auto repair works without `exec()`, but it runs after the current HTTP response is sent. The current request runs without stale deployment cache first.
 - `CONFIG_CACHE_GUARD_FAIL_HARD=true` intentionally stops the request with a safe 503 page, so in-app auto repair cannot run during that same request.
-- Change detection is metadata-based for performance. It uses file timestamps, size and inode metadata instead of reading file contents or `.env` values.
+- Change detection is metadata-based for performance. It uses file timestamps, size and inode metadata instead of reading file contents or `.env` values. Filesystems or deployment tools that preserve all of that metadata for a same-size in-place rewrite can therefore evade detection; a normal deployment cache rebuild remains the primary release mechanism.
 - Config cache creation when missing is opt-in through `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
-- Route cache guarding only activates automatically when a `bootstrap/cache/routes-*.php` file already exists.
+- Route cache guarding only activates automatically when a `routes-*.php` file already exists in Laravel's active bootstrap cache directory.
+- Pre-bootstrap cache path detection supports Laravel's standard `bootstrap` directory and Laravel 13's `.laravel` directory. Arbitrary bootstrap paths selected later through application code cannot be discovered before `bootstrap/app.php` runs.
+- A custom `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` or guard override placed only in `.env` is unavailable to the Composer-loaded pre-bootstrap guard. Configure these overrides at process or web-server level. The deferred layer intentionally keeps using the earlier external-environment snapshot for consistency.
 - The package does not clear application cache, view cache, event cache, OPcache or Redis.
 - This package is a fallback safety net. It should not replace a correct deployment pipeline that runs Laravel's deployment cache commands.
 
@@ -382,7 +394,7 @@ After fixing the issue, clear old markers:
 php artisan config-cache-guard:status --clear-failures
 ```
 
-Or remove them manually from `bootstrap/cache`.
+Or remove them manually from Laravel's active bootstrap cache directory.
 
 ### public/index.php still contains the old require line
 
@@ -396,6 +408,22 @@ Remove it manually, or run:
 
 ```bash
 php artisan config-cache-guard:install --remove-legacy
+```
+
+### PHPStan still reports `RefreshAfterRouteCacheRepair` after upgrading
+
+`src/Http/Middleware/RefreshAfterRouteCacheRepair.php` is not part of the current package. If PHPStan still scans it, an older source file remained because a ZIP was extracted over an existing checkout. Remove that exact stale file or replace the checkout in a clean directory, then regenerate Composer autoload metadata:
+
+```bash
+composer install
+composer dump-autoload --optimize
+```
+
+On Windows PowerShell, the obsolete file can be removed explicitly before regenerating autoload metadata:
+
+```powershell
+Remove-Item .\src\Http\Middleware\RefreshAfterRouteCacheRepair.php -Force -ErrorAction SilentlyContinue
+composer dump-autoload --optimize
 ```
 
 ### The wrong PHP binary is detected
@@ -436,6 +464,19 @@ Use a real server environment variable:
 CONFIG_CACHE_GUARD_ENABLED=false
 ```
 
+## Development and quality checks
+
+Install the development dependencies and run the complete quality gate with one cross-platform Composer command:
+
+```bash
+composer install
+composer check
+```
+
+`composer check` runs strict Composer validation, the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The focused commands remain available as `composer check:composer`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
+
+GitHub Actions validates every supported Laravel/PHP combination on Linux and also runs the lowest supported Laravel 12/PHP 8.2 combination on Windows. The Windows job exists specifically to catch path-separator and filesystem portability regressions without duplicating the complete version matrix.
+
 ## Uninstall
 
 Remove the package:
@@ -450,17 +491,19 @@ If you installed an older version that added a manual require line to `public/in
 require __DIR__ . '/../vendor/codegenie-be/laravel-config-cache-guard/bootstrap/guard.php';
 ```
 
-Optional cleanup:
+Optional cleanup for the default Laravel bootstrap cache directory (use `.laravel/cache` instead when that is the active directory):
 
 ```bash
 rm -f bootstrap/cache/config-source.signature
 rm -f bootstrap/cache/config-cache-refresh.lock
 rm -f bootstrap/cache/config-cache-refresh.pending
 rm -f bootstrap/cache/config-cache-refresh.failed
+rm -f bootstrap/cache/config-cache-refresh.succeeded
 rm -f bootstrap/cache/route-source.signature
 rm -f bootstrap/cache/route-cache-refresh.lock
 rm -f bootstrap/cache/route-cache-refresh.pending
 rm -f bootstrap/cache/route-cache-refresh.failed
+rm -f bootstrap/cache/route-cache-refresh.succeeded
 ```
 
 ## Security and privacy
@@ -473,6 +516,8 @@ This package is intentionally small and file-based.
 - It does not use a database.
 - It does not require Redis, queues, workers or cron.
 - It uses file locks to avoid concurrent rebuilds.
+- It atomically replaces and verifies source-signature files before a rebuilt cache is accepted as tracked deployment state.
+- It keeps only a request-local snapshot of the documented non-secret guard controls and cache paths; it does not snapshot arbitrary environment variables.
 - The automatic rebuild commands are fixed to `php artisan config:cache` and `php artisan route:cache`; paths are escaped and no user input is passed to the shell.
 - The in-app auto repair fallback uses Laravel's own `Artisan::call()` and does not expose command output.
 

@@ -18,19 +18,22 @@ It is designed to prevent Laravel from using stale deployment cache files withou
 
 The package may:
 
-- compare file metadata for `.env`, `.env.{APP_ENV}`, `config/**/*.php`, route files and route registration files
-- remove stale `bootstrap/cache/config.php`
-- remove stale `bootstrap/cache/routes-*.php`
+- compare file metadata for `.env`, `.env.{APP_ENV}`, config files, route files, application providers, active bootstrap registration files and Composer dependency metadata
+- remove stale config cache from Laravel's active cache path, including an externally configured `APP_CONFIG_CACHE` path
+- remove or bypass stale route cache in Laravel's active bootstrap cache directory
 - run fixed deployment-cache commands through PHP CLI when `exec()` is available
 - queue an internal pending marker when pre-bootstrap rebuilding is unavailable
 - rebuild through Laravel's own `Artisan::call()` after Laravel boots uncached
-- write safe diagnostic markers in `bootstrap/cache`
+- write safe diagnostic markers in Laravel's active bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`)
+- keep a request-local snapshot of the documented guard controls and cache-path variables so deferred repair uses the same pre-bootstrap inputs
+- atomically persist and verify source signatures before accepting rebuilt deployment cache as tracked
 
 ## What the package does not do
 
 The package does not:
 
 - read, log or store `.env` values
+- snapshot arbitrary environment variables or persist the documented control-variable snapshot to disk
 - store secrets, tokens, cookies or authorization headers
 - send data to external services
 - expose a public repair endpoint
@@ -54,11 +57,11 @@ php artisan route:cache
 
 The PHP binary path and application path are escaped before shell execution. No user input is passed into the command.
 
-When `exec()` is unavailable, the package falls back to internal in-app repair through `Artisan::call()` after Laravel has booted without the stale cache file.
+When `exec()` is unavailable, the package falls back to internal in-app repair through `Artisan::call()` after Laravel has booted without the stale cache file. If a known-stale cache file cannot be removed or bypassed, the guard stops the request with a safe 503 response instead of allowing Laravel to load it.
 
 ## Diagnostic markers
 
-Failure and pending marker files may be written to `bootstrap/cache`.
+Failure and pending marker files may be written to Laravel's active bootstrap cache directory. Pending markers may include a one-way source metadata signature so deferred repair records the exact deployment state detected before Laravel bootstraps.
 
 They contain:
 
@@ -73,7 +76,9 @@ They do not contain `.env` values, command output, exception traces, secrets or 
 ## Recommended production setup
 
 - Keep `APP_DEBUG=false` in production.
-- Keep `bootstrap/cache` writable by PHP but not publicly browsable.
+- Keep Laravel's active bootstrap cache directory writable by PHP but not publicly browsable.
+- When `APP_CONFIG_CACHE` points elsewhere, keep that file or its parent directory writable by PHP.
+- Configure pre-bootstrap overrides such as `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` and `CONFIG_CACHE_GUARD_*` at process or web-server level; values placed only in `.env` load too late for the Composer guard.
 - Do not place backups or logs under the public webroot.
 - Use this package as a safety net, not as a replacement for deployment checks.
 - Prefer running `php artisan config:cache` and `php artisan route:cache` during deployment when your hosting supports it.

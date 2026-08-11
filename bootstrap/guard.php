@@ -33,6 +33,34 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return null;
     };
 
+    $capturedEnvironmentKey = '__codegenie_config_cache_guard_external_environment';
+
+    if (! array_key_exists($capturedEnvironmentKey, $GLOBALS)) {
+        $capturedEnvironment = [];
+
+        foreach ([
+            'APP_CONFIG_CACHE',
+            'APP_ENV',
+            'APP_ROUTES_CACHE',
+            'CONFIG_CACHE_GUARD_ALLOW_CLI',
+            'CONFIG_CACHE_GUARD_AUTO_REPAIR',
+            'CONFIG_CACHE_GUARD_CONFIG',
+            'CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE',
+            'CONFIG_CACHE_GUARD_ENABLED',
+            'CONFIG_CACHE_GUARD_FAIL_HARD',
+            'CONFIG_CACHE_GUARD_FAILURE_COOLDOWN',
+            'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE',
+            'CONFIG_CACHE_GUARD_PHP_BINARY',
+            'CONFIG_CACHE_GUARD_ROUTES',
+            'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
+            'PHP_CLI_BINARY',
+        ] as $environmentName) {
+            $capturedEnvironment[$environmentName] = $envString($environmentName);
+        }
+
+        $GLOBALS[$capturedEnvironmentKey] = $capturedEnvironment;
+    }
+
     $envFlagEnabled = static function (string $name, bool $default = true) use ($envString): bool {
         $value = $envString($name);
 
@@ -43,15 +71,29 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return ! in_array(strtolower($value), ['0', 'false', 'off', 'no'], true);
     };
 
-    $setEnvString = static function (string $name, string $value): void {
+    $setEnvString = static function (string $name, string $value) use ($capturedEnvironmentKey): void {
         putenv($name.'='.$value);
         $_ENV[$name] = $value;
         $_SERVER[$name] = $value;
+
+        $capturedEnvironment = $GLOBALS[$capturedEnvironmentKey] ?? null;
+
+        if (is_array($capturedEnvironment)) {
+            $capturedEnvironment[$name] = $value;
+            $GLOBALS[$capturedEnvironmentKey] = $capturedEnvironment;
+        }
     };
 
-    $unsetEnvString = static function (string $name): void {
+    $unsetEnvString = static function (string $name) use ($capturedEnvironmentKey): void {
         putenv($name);
         unset($_ENV[$name], $_SERVER[$name]);
+
+        $capturedEnvironment = $GLOBALS[$capturedEnvironmentKey] ?? null;
+
+        if (is_array($capturedEnvironment)) {
+            $capturedEnvironment[$name] = null;
+            $GLOBALS[$capturedEnvironmentKey] = $capturedEnvironment;
+        }
     };
 
     if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && ! $envFlagEnabled('CONFIG_CACHE_GUARD_ALLOW_CLI', false)) {
@@ -116,8 +158,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 continue;
             }
 
+            $hasLaravelCacheDirectory = is_dir($candidate.'/bootstrap/cache')
+                || is_dir($candidate.'/.laravel/cache');
+
             if (
-                is_dir($candidate.'/bootstrap/cache')
+                $hasLaravelCacheDirectory
                 && (is_file($candidate.'/artisan') || is_dir($candidate.'/config') || is_dir($candidate.'/routes'))
             ) {
                 return $candidate;
@@ -133,7 +178,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return;
     }
 
-    $cacheDir = $basePath.'/bootstrap/cache';
+    $bootstrapPath = is_dir($basePath.'/.laravel')
+        ? $basePath.'/.laravel'
+        : $basePath.'/bootstrap';
+    $cacheDir = $bootstrapPath.'/cache';
+    $relativeCacheDir = ltrim(str_replace('\\', '/', substr($cacheDir, strlen($basePath))), '/');
 
     if (! is_dir($cacheDir)) {
         return;
@@ -261,8 +310,49 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return trim($contents);
     };
 
-    $writeSignature = static function (string $path, string $signature): void {
-        @file_put_contents($path, $signature, LOCK_EX);
+    $writeFileAtomically = static function (string $path, string $contents): bool {
+        $directory = dirname($path);
+
+        if (! is_dir($directory)) {
+            return false;
+        }
+
+        $temporaryPath = @tempnam($directory, '.config-cache-guard-');
+
+        if ($temporaryPath === false) {
+            return false;
+        }
+
+        try {
+            $written = @file_put_contents($temporaryPath, $contents, LOCK_EX);
+
+            if ($written !== strlen($contents)) {
+                return false;
+            }
+
+            if (! @rename($temporaryPath, $path)) {
+                if (is_file($path) && ! @unlink($path)) {
+                    return false;
+                }
+
+                if (! @rename($temporaryPath, $path)) {
+                    return false;
+                }
+            }
+
+            clearstatcache(true, $path);
+            $storedContents = @file_get_contents($path);
+
+            return is_string($storedContents) && hash_equals($contents, $storedContents);
+        } finally {
+            if (is_file($temporaryPath)) {
+                @unlink($temporaryPath);
+            }
+        }
+    };
+
+    $writeSignature = static function (string $path, string $signature) use ($writeFileAtomically): bool {
+        return $writeFileAtomically($path, $signature);
     };
 
     $invalidateOpcache = static function (string $path): void {
@@ -276,15 +366,27 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
     /**
      * @param  array<int, mixed>  $paths
      */
-    $removeCachedFiles = static function (array $paths) use ($invalidateOpcache): void {
+    $removeCachedFiles = static function (array $paths) use ($invalidateOpcache): bool {
+        $removed = true;
+
         foreach ($paths as $path) {
             if (! is_string($path) || $path === '') {
                 continue;
             }
 
-            @unlink($path);
+            if (is_file($path)) {
+                @unlink($path);
+            }
+
             $invalidateOpcache($path);
+            clearstatcache(true, $path);
+
+            if (is_file($path)) {
+                $removed = false;
+            }
         }
+
+        return $removed;
     };
 
     /**
@@ -300,37 +402,57 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return false;
     };
 
-    $markerContents = static function (string $title, string $target, string $reason, string $message, string $action): string {
-        return implode(PHP_EOL, [
+    $markerContents = static function (
+        string $title,
+        string $target,
+        string $reason,
+        string $message,
+        string $action,
+        ?string $sourceSignature = null
+    ): string {
+        return implode(PHP_EOL, array_filter([
             $title,
             'generated_at='.gmdate('c'),
             'target='.$target,
             'reason='.$reason,
             'message='.$message,
             'action='.$action,
+            $sourceSignature === null ? null : 'source_signature='.$sourceSignature,
             'note=No .env values, secrets, tokens or command output are stored in this file.',
             '',
-        ]);
+        ], static fn (?string $line): bool => $line !== null));
     };
 
-    $writeFailureMarker = static function (string $path, string $target, string $reason, string $message, string $action) use ($markerContents): void {
-        @file_put_contents(
+    $writeFailureMarker = static function (string $path, string $target, string $reason, string $message, string $action) use ($markerContents, $writeFileAtomically): bool {
+        return $writeFileAtomically(
             $path,
-            $markerContents('Codegenie Laravel Config Cache Guard failure', $target, $reason, $message, $action),
-            LOCK_EX
+            $markerContents('Codegenie Laravel Config Cache Guard failure', $target, $reason, $message, $action)
         );
     };
 
-    $writePendingMarker = static function (string $path, string $target, string $reason, string $message, string $action) use ($markerContents): void {
-        @file_put_contents(
+    $writePendingMarker = static function (
+        string $path,
+        string $target,
+        string $reason,
+        string $message,
+        string $action,
+        string $sourceSignature
+    ) use ($markerContents, $writeFileAtomically): bool {
+        return $writeFileAtomically(
             $path,
-            $markerContents('Codegenie Laravel Config Cache Guard pending auto repair', $target, $reason, $message, $action),
-            LOCK_EX
+            $markerContents(
+                'Codegenie Laravel Config Cache Guard pending auto repair',
+                $target,
+                $reason,
+                $message,
+                $action,
+                $sourceSignature
+            )
         );
     };
 
-    $writeSuccessMarker = static function (string $path, string $target, string $cacheFile, ?string $sourceSignature, int $cleanedStaleFiles = 0): void {
-        @file_put_contents(
+    $writeSuccessMarker = static function (string $path, string $target, string $cacheFile, ?string $sourceSignature, int $cleanedStaleFiles = 0) use ($writeFileAtomically): void {
+        $writeFileAtomically(
             $path,
             implode(PHP_EOL, array_filter([
                 'Codegenie Laravel Config Cache Guard success',
@@ -341,12 +463,15 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 'cleaned_stale_files='.$cleanedStaleFiles,
                 'note=No .env values, secrets, tokens or command output are stored in this file.',
                 '',
-            ], static fn (?string $line): bool => $line !== null)),
-            LOCK_EX
+            ], static fn (?string $line): bool => $line !== null))
         );
     };
 
     $showFailure = static function (string $target, string $reason, string $message, string $action): void {
+        if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
+            throw new RuntimeException($message.' '.$action);
+        }
+
         http_response_code(503);
         header('Content-Type: text/html; charset=UTF-8');
 
@@ -362,6 +487,28 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         exit;
     };
 
+    $stopUnsafeRequest = static function (string $failedPath, string $name, string $reason, string $message, string $action) use ($writeFailureMarker, $showFailure): void {
+        $writeFailureMarker($failedPath, $name, $reason, $message, $action);
+        $showFailure($name, $reason, $message, $action);
+    };
+
+    /**
+     * @param  array<int, mixed>  $paths
+     */
+    $removeCachedFilesOrStop = static function (array $paths, string $failedPath, string $name) use ($removeCachedFiles, $stopUnsafeRequest): void {
+        if ($removeCachedFiles($paths)) {
+            return;
+        }
+
+        $stopUnsafeRequest(
+            $failedPath,
+            $name,
+            'stale_cache_removal_failed',
+            'Laravel deployment cache is stale, but the guard could not remove the unsafe cache file.',
+            'Fix ownership and write permissions for the configured cache file before retrying the request.'
+        );
+    };
+
     $fail = static function (string $failedPath, string $name, string $reason, string $message, string $action) use ($writeFailureMarker, $showFailure, $failHard): void {
         $writeFailureMarker($failedPath, $name, $reason, $message, $action);
 
@@ -370,17 +517,38 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         }
     };
 
-    $queueAutoRepairOrFail = static function (string $pendingPath, string $failedPath, string $name, string $reason, string $message, string $action) use ($autoRepair, $writePendingMarker, $showFailure, $failHard, $fail): bool {
+    $queueAutoRepairOrFail = static function (
+        string $pendingPath,
+        string $failedPath,
+        string $name,
+        string $reason,
+        string $message,
+        string $action,
+        string $sourceSignature
+    ) use ($autoRepair, $writePendingMarker, $showFailure, $failHard, $fail): bool {
         if ($autoRepair) {
             @unlink($failedPath);
 
-            $writePendingMarker(
+            $pendingWritten = $writePendingMarker(
                 $pendingPath,
                 $name,
                 $reason,
                 $message,
-                'Laravel will try to rebuild this cache through Artisan::call() after the current HTTP response is sent.'
+                'Laravel will try to rebuild this cache through Artisan::call() after the current HTTP response is sent.',
+                $sourceSignature
             );
+
+            if (! $pendingWritten) {
+                $fail(
+                    $failedPath,
+                    $name,
+                    'pending_marker_write_failed',
+                    'The stale cache was bypassed, but the guard could not write the pending in-app repair marker.',
+                    'Fix ownership and write permissions for the active Laravel cache directory, then rebuild the cache manually.'
+                );
+
+                return false;
+            }
 
             if ($failHard) {
                 $showFailure(
@@ -460,9 +628,9 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
     $runArtisan = static function (string $command, string $phpBinary) use ($basePath): bool {
         $shellCommand = sprintf(
-            'cd %s && %s artisan %s --no-interaction --no-ansi 2>&1',
-            escapeshellarg($basePath),
+            '%s %s %s --no-interaction --no-ansi 2>&1',
             escapeshellarg($phpBinary),
+            escapeshellarg($basePath.DIRECTORY_SEPARATOR.'artisan'),
             escapeshellarg($command)
         );
 
@@ -500,7 +668,32 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             return false;
         }
 
-        return preg_match('#^bootstrap/cache/routes-[a-f0-9]{16,64}\.php$#i', str_replace('\\', '/', $path)) === 1;
+        return preg_match('#^(?:bootstrap|\.laravel)/cache/routes-[a-f0-9]{16,64}\.php$#i', str_replace('\\', '/', $path)) === 1;
+    };
+
+    $configuredConfigCachePath = $envString('APP_CONFIG_CACHE');
+    $configCachePath = $configuredConfigCachePath !== null
+        ? $resolveCachePath($configuredConfigCachePath)
+        : $cacheDir.'/config.php';
+
+    /**
+     * @return list<string>
+     */
+    $deploymentSourceFiles = static function () use ($basePath, $bootstrapPath, $collectPhpFiles): array {
+        $files = $collectPhpFiles($basePath.'/app/Providers');
+
+        foreach ([
+            $basePath.'/composer.json',
+            $basePath.'/composer.lock',
+            $bootstrapPath.'/app.php',
+            $bootstrapPath.'/providers.php',
+        ] as $sourceFile) {
+            if (is_file($sourceFile)) {
+                $files[] = $sourceFile;
+            }
+        }
+
+        return $files;
     };
 
     /**
@@ -511,6 +704,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $readSignature,
         $writeSignature,
         $removeCachedFiles,
+        $removeCachedFilesOrStop,
         $invalidateOpcache,
         $cacheExists,
         $isRecentlyFailed,
@@ -520,7 +714,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $arrayFromCallback,
         $failureCooldownSeconds,
         $writeSuccessMarker,
-        $fail,
+        $showFailure,
+        $failHard,
         $queueAutoRepairOrFail
     ): void {
         $artisanCommand = $target['artisan_command'] ?? null;
@@ -562,31 +757,34 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
         $cachedFiles = $arrayFromCallback($cachedFilesCallback);
         $targetCacheExists = $cacheExists($cachedFiles);
+        $repairStateExists = is_file($failedPath) || is_file($pendingPath);
 
-        if (! $targetCacheExists && ! $createWhenMissing) {
+        if (! $targetCacheExists && ! $createWhenMissing && ! $repairStateExists) {
             return;
         }
 
         $storedSignature = $readSignature($signaturePath);
 
         if ($storedSignature === $currentSignature && $targetCacheExists) {
+            @unlink($failedPath);
+            @unlink($pendingPath);
+
             return;
         }
 
         if ($isRecentlyFailed($failedPath, $failureCooldownSeconds)) {
             if ($removeCachedFilesWhenPending) {
-                $removeCachedFiles($cachedFiles);
+                $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
             }
 
             @unlink($pendingPath);
 
-            if ($failOnRecentFailure) {
-                $fail(
-                    $failedPath,
+            if ($failOnRecentFailure && $failHard) {
+                $showFailure(
                     $name,
                     'recent_failure_cooldown',
                     'Automatic '.$name.' cache refresh recently failed and is waiting before retrying.',
-                    'Fix the cause shown in this marker, then clear failure markers or wait for the cooldown.'
+                    'Fix the cause shown in the existing failure marker, then clear failure markers or wait for the cooldown.'
                 );
             }
 
@@ -596,11 +794,39 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $lock = @fopen($lockPath, 'c');
 
         if ($lock === false) {
+            if ($removeCachedFilesWhenPending) {
+                $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
+            }
+
+            $queueAutoRepairOrFail(
+                $pendingPath,
+                $failedPath,
+                $name,
+                'lock_unavailable',
+                'Automatic '.$name.' cache refresh could not acquire its filesystem lock before Laravel booted.',
+                'Fix ownership and write permissions for the active Laravel cache directory.',
+                $currentSignature
+            );
+
             return;
         }
 
         try {
             if (! flock($lock, LOCK_EX)) {
+                if ($removeCachedFilesWhenPending) {
+                    $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
+                }
+
+                $queueAutoRepairOrFail(
+                    $pendingPath,
+                    $failedPath,
+                    $name,
+                    'lock_unavailable',
+                    'Automatic '.$name.' cache refresh could not acquire its filesystem lock before Laravel booted.',
+                    'Fix ownership and write permissions for the active Laravel cache directory.',
+                    $currentSignature
+                );
+
                 return;
             }
 
@@ -615,20 +841,24 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
             $cachedFiles = $arrayFromCallback($cachedFilesCallback);
             $targetCacheExists = $cacheExists($cachedFiles);
+            $repairStateExists = is_file($failedPath) || is_file($pendingPath);
 
-            if (! $targetCacheExists && ! $createWhenMissing) {
+            if (! $targetCacheExists && ! $createWhenMissing && ! $repairStateExists) {
                 return;
             }
 
             $storedSignature = $readSignature($signaturePath);
 
             if ($storedSignature === $currentSignature && $targetCacheExists) {
+                @unlink($failedPath);
+                @unlink($pendingPath);
+
                 return;
             }
 
             if (! $canUseExec()) {
                 if ($removeCachedFilesWhenPending) {
-                    $removeCachedFiles($cachedFiles);
+                    $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
                 }
 
                 $queued = $queueAutoRepairOrFail(
@@ -637,7 +867,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     $name,
                     'exec_disabled',
                     'Automatic '.$name.' cache refresh cannot run before Laravel boots because PHP exec() is unavailable or disabled on this hosting account.',
-                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after the current HTTP response is sent.'
+                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after the current HTTP response is sent.',
+                    $currentSignature
                 );
 
                 if (! $queued && ! $removeCachedFilesWhenPending) {
@@ -651,7 +882,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
             if ($phpBinary === null) {
                 if ($removeCachedFilesWhenPending) {
-                    $removeCachedFiles($cachedFiles);
+                    $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
                 }
 
                 $queued = $queueAutoRepairOrFail(
@@ -660,7 +891,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     $name,
                     'php_cli_not_found',
                     'Automatic '.$name.' cache refresh cannot run before Laravel boots because no PHP CLI binary was found.',
-                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or let the in-app auto repair fallback rebuild after the current HTTP response is sent.'
+                    'Set CONFIG_CACHE_GUARD_PHP_BINARY to the full PHP CLI path, or let the in-app auto repair fallback rebuild after the current HTTP response is sent.',
+                    $currentSignature
                 );
 
                 if (! $queued && ! $removeCachedFilesWhenPending) {
@@ -675,7 +907,28 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             $targetCacheExists = $cacheExists($cachedFiles);
 
             if ($rebuilt && $targetCacheExists) {
-                $writeSignature($signaturePath, $currentSignature);
+                if (! $writeSignature($signaturePath, $currentSignature)) {
+                    if ($removeCachedFilesWhenPending) {
+                        $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
+                    }
+
+                    $queued = $queueAutoRepairOrFail(
+                        $pendingPath,
+                        $failedPath,
+                        $name,
+                        'signature_write_failed',
+                        'The '.$name.' cache was rebuilt, but its deployment source signature could not be stored safely.',
+                        'Fix ownership and write permissions for the source signature in the active Laravel cache directory.',
+                        $currentSignature
+                    );
+
+                    if (! $queued && ! $removeCachedFilesWhenPending) {
+                        $removeCachedFiles($cachedFiles);
+                    }
+
+                    return;
+                }
+
                 @unlink($failedPath);
                 @unlink($pendingPath);
 
@@ -724,7 +977,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             }
 
             if ($removeCachedFilesWhenPending) {
-                $removeCachedFiles($cachedFiles);
+                $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
             }
 
             $queued = $queueAutoRepairOrFail(
@@ -733,7 +986,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 $name,
                 'artisan_command_failed',
                 'The '.$artisanCommand.' command did not complete successfully before Laravel booted.',
-                'Check whether this application can run the command successfully, or let the in-app auto repair fallback try after the current HTTP response is sent.'
+                'Check whether this application can run the command successfully, or let the in-app auto repair fallback try after the current HTTP response is sent.',
+                $currentSignature
             );
 
             if (! $queued && ! $removeCachedFilesWhenPending) {
@@ -751,15 +1005,19 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         if (is_dir($configDir)) {
             $refreshDeploymentCache([
                 'artisan_command' => 'config:cache',
-                'cached_files' => static fn (): array => [$cacheDir.'/config.php'],
+                'cached_files' => static fn (): array => [$configCachePath],
                 'create_when_missing' => $createConfigWhenMissing,
                 'failed_path' => $cacheDir.'/config-cache-refresh.failed',
                 'lock_path' => $cacheDir.'/config-cache-refresh.lock',
                 'name' => 'config',
                 'pending_path' => $cacheDir.'/config-cache-refresh.pending',
                 'signature_path' => $cacheDir.'/config-source.signature',
-                'source_files' => static function () use ($collectPhpFiles, $configDir, $envFiles): array {
-                    return array_merge($collectPhpFiles($configDir), $envFiles());
+                'source_files' => static function () use ($collectPhpFiles, $configDir, $deploymentSourceFiles, $envFiles): array {
+                    return array_merge(
+                        $collectPhpFiles($configDir),
+                        $deploymentSourceFiles(),
+                        $envFiles()
+                    );
                 },
             ]);
         }
@@ -791,19 +1049,13 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
             return array_values(array_unique(array_filter($files, 'is_string')));
         };
-        $routeSourceFiles = static function () use ($basePath, $collectPhpFiles, $envFiles): array {
-            $files = array_merge($collectPhpFiles($basePath.'/routes'), $envFiles());
-
-            foreach ([
-                $basePath.'/bootstrap/app.php',
-                $basePath.'/app/Providers/RouteServiceProvider.php',
-            ] as $routeSourceFile) {
-                if (is_file($routeSourceFile)) {
-                    $files[] = $routeSourceFile;
-                }
-            }
-
-            return $files;
+        $routeSourceFiles = static function () use ($basePath, $collectPhpFiles, $deploymentSourceFiles, $envFiles): array {
+            return array_merge(
+                $collectPhpFiles($basePath.'/config'),
+                $collectPhpFiles($basePath.'/routes'),
+                $deploymentSourceFiles(),
+                $envFiles()
+            );
         };
 
         if ($routeCacheFiles() !== []) {
@@ -820,7 +1072,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 && $versionedRouteCacheEnabled;
 
             if ($routeCacheWillBeBypassed) {
-                $relativeRouteCachePath = 'bootstrap/cache/routes-'.$routeSignature.'.php';
+                $relativeRouteCachePath = $relativeCacheDir.'/routes-'.$routeSignature.'.php';
                 $routeCachePath = $basePath.'/'.$relativeRouteCachePath;
                 $createRouteCacheWhenMissing = true;
                 $setEnvString('APP_ROUTES_CACHE', $relativeRouteCachePath);

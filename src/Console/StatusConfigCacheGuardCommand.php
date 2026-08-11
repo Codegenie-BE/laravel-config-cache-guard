@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Codegenie\ConfigCacheGuard\Console;
 
+use Codegenie\ConfigCacheGuard\Support\ConfigCacheFile;
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
@@ -20,8 +21,8 @@ final class StatusConfigCacheGuardCommand extends Command
     public function handle(): int
     {
         $indexPath = public_path('index.php');
-        $cachePath = base_path('bootstrap/cache');
-        $cachedConfigPath = $cachePath.'/config.php';
+        $cachePath = app()->bootstrapPath('cache');
+        $cachedConfigPath = ConfigCacheFile::current(base_path(), $cachePath);
         $configSignaturePath = $cachePath.'/config-source.signature';
         $configFailedPath = $cachePath.'/config-cache-refresh.failed';
         $configPendingPath = $cachePath.'/config-cache-refresh.pending';
@@ -59,6 +60,11 @@ final class StatusConfigCacheGuardCommand extends Command
         $execAvailable = $this->canUseExec();
         $phpBinary = $this->resolvePhpBinary();
         $cacheWritable = is_writable($cachePath);
+        $customConfigCachePath = $this->normalizePath($cachedConfigPath)
+            !== $this->normalizePath($cachePath.'/config.php');
+        $configCacheWritable = is_file($cachedConfigPath)
+            ? is_writable($cachedConfigPath)
+            : is_writable(dirname($cachedConfigPath));
 
         $this->table(['Check', 'Status'], [
             ['Composer autoload integration', 'yes'],
@@ -71,10 +77,12 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
-            ['bootstrap/cache path', $cachePath],
-            ['bootstrap/cache writable', $cacheWritable ? 'yes' : 'no'],
-            ['current config cache path', $cachedConfigPath],
-            ['cached config exists', is_file($cachedConfigPath) ? 'yes' : 'no'],
+            ['Active Laravel cache path', $cachePath],
+            ['Active Laravel cache path writable', $cacheWritable ? 'yes' : 'no'],
+            ['Current config cache path', $cachedConfigPath],
+            ['Custom config cache path', $customConfigCachePath ? 'yes' : 'no'],
+            ['Config cache path writable', $configCacheWritable ? 'yes' : 'no'],
+            ['Cached config exists', is_file($cachedConfigPath) ? 'yes' : 'no'],
             ['config signature exists', is_file($configSignaturePath) ? 'yes' : 'no'],
             ['config pending repair', FailureMarker::summary($configPendingPath) ?? 'no'],
             ['config failed marker', FailureMarker::summary($configFailedPath) ?? 'no'],
@@ -98,7 +106,13 @@ final class StatusConfigCacheGuardCommand extends Command
         }
 
         if (! $cacheWritable) {
-            $this->error('Result: installed, but bootstrap/cache is not writable. Fix permissions before using the guard.');
+            $this->error('Result: installed, but the active Laravel cache directory is not writable. Fix permissions before using the guard.');
+
+            return self::SUCCESS;
+        }
+
+        if ($configGuardEnabled && (is_file($cachedConfigPath) || $createConfigWhenMissing) && ! $configCacheWritable) {
+            $this->error('Result: installed, but the configured config cache path is not writable. Stale config cannot be replaced safely.');
 
             return self::SUCCESS;
         }
@@ -112,6 +126,10 @@ final class StatusConfigCacheGuardCommand extends Command
         if ($legacyIndexRequire) {
             $this->warn('Notice: public/index.php still contains the old manual require line. It is safe, but no longer needed.');
             $this->line('Run: php artisan config-cache-guard:install --remove-legacy');
+        }
+
+        if ($customConfigCachePath) {
+            $this->warn('Notice: a custom config cache path is active. Ensure APP_CONFIG_CACHE is configured at process or web-server level; a value placed only in .env is not visible to the pre-bootstrap guard.');
         }
 
         if (! $execAvailable || $phpBinary === null) {
@@ -176,6 +194,11 @@ final class StatusConfigCacheGuardCommand extends Command
         }
 
         return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
+    }
+
+    private function normalizePath(string $path): string
+    {
+        return rtrim(str_replace('\\', '/', $path), '/');
     }
 
     private function canUseExec(): bool
