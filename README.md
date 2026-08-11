@@ -18,6 +18,11 @@ It is built for Laravel 12 and 13 applications deployed through FTP, cPanel, Ple
 
 ```bash
 composer require codegenie-be/laravel-config-cache-guard
+```
+
+That single Composer command completes installation. Optionally verify the integration with:
+
+```bash
 php artisan config-cache-guard:status
 ```
 
@@ -152,10 +157,15 @@ This order is important. A Laravel middleware or normal service provider is too 
 
 ```bash
 composer require codegenie-be/laravel-config-cache-guard
-php artisan config-cache-guard:status
 ```
 
-That is enough for normal Laravel projects. No manual require line is needed in `public/index.php`.
+That single Composer command is enough for normal Laravel projects. No manual require line is needed in `public/index.php`.
+
+Optionally verify the integration with:
+
+```bash
+php artisan config-cache-guard:status
+```
 
 ### Upgrading from older versions
 
