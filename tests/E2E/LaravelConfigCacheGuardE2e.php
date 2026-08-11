@@ -840,7 +840,8 @@ PHP
 
     private static function comparablePath(string $path): string
     {
-        $normalized = self::normalizePath($path);
+        $resolvedPath = realpath($path);
+        $normalized = self::normalizePath(is_string($resolvedPath) ? $resolvedPath : $path);
 
         return PHP_OS_FAMILY === 'Windows' ? strtolower($normalized) : $normalized;
     }
