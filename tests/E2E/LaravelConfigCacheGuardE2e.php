@@ -351,7 +351,7 @@ PHP
                 true
             );
             self::assert(
-                self::normalizePath((string) $response['config_path']) === self::normalizePath($customAbsolutePath),
+                self::comparablePath((string) $response['config_path']) === self::comparablePath($customAbsolutePath),
                 'Laravel did not use the externally configured APP_CONFIG_CACHE path.'
             );
             self::assert(! is_file($this->defaultConfigCachePath), 'The guard rebuilt the wrong config cache file.');
@@ -537,15 +537,17 @@ PHP
      */
     private function assertDefaultCachePaths(array $response): void
     {
+        $actualConfigPath = self::comparablePath((string) ($response['config_path'] ?? ''));
+        $expectedConfigPath = self::comparablePath($this->defaultConfigCachePath);
         self::assert(
-            self::normalizePath((string) ($response['config_path'] ?? ''))
-                === self::normalizePath($this->defaultConfigCachePath),
-            'Laravel did not use the expected config cache path.'
+            $actualConfigPath === $expectedConfigPath,
+            'Laravel did not use the expected config cache path. Expected '
+                .$expectedConfigPath.', got '.$actualConfigPath.'.'
         );
         self::assert(
             str_starts_with(
-                self::normalizePath((string) ($response['routes_path'] ?? '')),
-                self::normalizePath($this->cachePath).'/routes-'
+                self::comparablePath((string) ($response['routes_path'] ?? '')),
+                self::comparablePath($this->cachePath).'/routes-'
             ),
             'Laravel did not use the guard-managed versioned route cache path.'
         );
@@ -834,6 +836,13 @@ PHP
     private static function normalizePath(string $path): string
     {
         return str_replace('\\', '/', $path);
+    }
+
+    private static function comparablePath(string $path): string
+    {
+        $normalized = self::normalizePath($path);
+
+        return PHP_OS_FAMILY === 'Windows' ? strtolower($normalized) : $normalized;
     }
 }
 
