@@ -2,6 +2,14 @@
 
 All notable changes to `codegenie-be/laravel-config-cache-guard` will be documented in this file.
 
+## Unreleased
+
+- Added real application end-to-end tests that install the package through Composer into fresh Laravel 12 and 13 projects.
+- Added HTTP coverage for pre-bootstrap CLI repair, the `exec()`-disabled deferred repair fallback, custom `APP_CONFIG_CACHE` paths and `.laravel` bootstrap cache paths.
+- Added Linux and Windows E2E jobs and a `composer check:release` pre-release quality gate.
+- Added a date-aware support policy gate that rejects EOL PHP or Laravel versions in Composer and CI.
+- Expanded the primary CI matrix to all seven currently supported PHP/Laravel combinations.
+
 ## v1.3.0 - 2026-08-11
 
 - Load the pre-bootstrap guard automatically through Composer `autoload.files`.

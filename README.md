@@ -209,6 +209,8 @@ When `exec()` is unavailable, the in-app auto repair fallback can still rebuild 
 
 PHP 8.2 is security fixes only until December 31, 2026. For new production projects, prefer PHP 8.4 or PHP 8.5 when your hosting supports it.
 
+As of August 11, 2026, the non-EOL runtime matrix is PHP 8.2, 8.3, 8.4 and 8.5 with Laravel 12, plus PHP 8.3, 8.4 and 8.5 with Laravel 13. Security-only support still counts as supported; a version is removed when its official security support ends. `composer check:support` validates the Composer constraints and every literal CI matrix version against the dates in `tests/Support/policy.php`, and deliberately fails once a configured branch reaches EOL so the package cannot silently keep testing or advertising it.
+
 Useful references:
 
 - PHP supported versions: https://www.php.net/supported-versions.php
@@ -473,9 +475,18 @@ composer install
 composer check
 ```
 
-`composer check` runs strict Composer validation, the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The focused commands remain available as `composer check:composer`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
+`composer check` validates that no configured PHP or Laravel branch is EOL, then runs strict Composer validation, the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
 
-GitHub Actions validates every supported Laravel/PHP combination on Linux and also runs the lowest supported Laravel 12/PHP 8.2 combination on Windows. The Windows job exists specifically to catch path-separator and filesystem portability regressions without duplicating the complete version matrix.
+Run the real application end-to-end suite before a release:
+
+```bash
+composer test:e2e
+composer check:release
+```
+
+`composer test:e2e` creates temporary fresh Laravel 12 and 13 applications, installs this checkout through a copied Composer path repository, builds real config and route caches, and sends HTTP requests through PHP's built-in server. It verifies pre-bootstrap CLI repair, the `exec()`-disabled in-app fallback, a custom `APP_CONFIG_CACHE` path and Laravel 13 with `.laravel` as its active bootstrap path. The temporary applications are removed automatically. Use `composer test:e2e -- --laravel=12` to run one framework version or add `--keep` to retain a failing fixture for inspection.
+
+GitHub Actions validates every supported Laravel/PHP combination on Linux, runs the lowest supported Laravel 12/PHP 8.2 quality gate on Windows, and executes real application E2E jobs for Laravel 12 and 13 on Linux plus Laravel 12 on Windows. The E2E jobs require Composer network access because they deliberately install clean framework applications.
 
 ## Uninstall
 
