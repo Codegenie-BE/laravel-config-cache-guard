@@ -1,0 +1,67 @@
+name: Bug report
+description: Report reproducible incorrect behavior in the cache guard.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include `.env` values, tokens, credentials, private URLs, customer data or unredacted server paths.
+  - type: input
+    id: package_version
+    attributes:
+      label: Package version
+      placeholder: v1.3.1
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: PHP and Laravel versions
+      placeholder: PHP 8.4.10 / Laravel 13.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: cache_target
+    attributes:
+      label: Affected cache
+      options:
+        - Config cache
+        - Route cache
+        - Both
+        - Status or installation command
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List exact deployment and request steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Redacted status output
+      description: Paste only safe, redacted output from `php artisan config-cache-guard:status`.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, `.env` values, private URLs, customer data and identifying server paths.
+          required: true

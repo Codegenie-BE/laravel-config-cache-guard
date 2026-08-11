@@ -2,18 +2,17 @@
 
 [![Tests](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml/badge.svg)](https://github.com/Codegenie-BE/laravel-config-cache-guard/actions/workflows/tests.yml)
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/codegenie-be/laravel-config-cache-guard.svg)](https://packagist.org/packages/codegenie-be/laravel-config-cache-guard)
-[![Total Downloads](https://img.shields.io/packagist/dt/codegenie-be/laravel-config-cache-guard.svg)](https://packagist.org/packages/codegenie-be/laravel-config-cache-guard)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![PHP](https://img.shields.io/badge/php-%5E8.2-777BB4.svg)](https://www.php.net/supported-versions.php)
 [![Laravel](https://img.shields.io/badge/laravel-12%20%7C%2013-FF2D20.svg)](https://laravel.com/docs/13.x/releases)
 
 **by [Codegenie](https://www.codegenie.be)**
 
-Prevent Laravel from running with stale cached configuration or stale cached routes after environment, configuration, route, provider or dependency changes.
+**Never serve stale Laravel configuration or routes after an FTP or shared-hosting deployment, even when `exec()` is disabled.**
 
-Built for Laravel 12 and 13 apps on shared hosting, FTP deployments and simple production setups where `php artisan config:cache` or `php artisan route:cache` can accidentally be forgotten.
+Laravel Config Cache Guard detects relevant deployment changes before Laravel boots, prevents stale cache files from being used and safely repairs them through the PHP CLI or Laravel's own `Artisan::call()` fallback.
 
-> This package is a safety net. The best production flow is still to rebuild Laravel deployment caches during deployment.
+It is built for Laravel 12 and 13 applications deployed through FTP, cPanel, Plesk or other environments where deployment hooks, SSH or shell functions may be unavailable.
 
 ## Quick start
 
@@ -23,6 +22,33 @@ php artisan config-cache-guard:status
 ```
 
 No `public/index.php` change is required. The guard is loaded automatically by Composer when Laravel requires `vendor/autoload.php`, before `bootstrap/app.php` bootstraps the application.
+
+- [Open the package website](https://codegenie-be.github.io/laravel-config-cache-guard/)
+- [Watch the verified repair flow](#verified-repair-demo)
+- [Read the deployment recipes](docs/deployment-recipes.md)
+- [Ask a question](https://github.com/Codegenie-BE/laravel-config-cache-guard/discussions)
+
+## Who this is for
+
+Use this package when your application already uses config or route cache and:
+
+- you deploy through FTP, cPanel, Plesk or shared hosting
+- deployment cache commands can occasionally be skipped
+- SSH, `exec()` or a reliable deploy hook is unavailable
+- you want stale cache to be rejected before Laravel can load it
+- you need a small file-based safety net without Redis, queues, cron or a database
+
+Do not use it as a replacement for a correct deployment pipeline. A deployment that can reliably run Laravel's cache commands should keep doing so.
+
+By default, the package does **not** create config cache when none exists and does **not** enable route caching for applications that are not already using it.
+
+## Verified repair demo
+
+![Terminal demonstration of Laravel Config Cache Guard rejecting stale deployment cache and completing deferred repair](https://raw.githubusercontent.com/Codegenie-BE/laravel-config-cache-guard/main/docs/assets/demo.gif)
+
+The animation is a concise transcript of the real Laravel 13, `exec()`-disabled scenario covered by the package E2E suite. Read the [accessible transcript and verification notes](docs/demo-transcript.md).
+
+> This package is a safety net. The best production flow is still to rebuild Laravel deployment caches during deployment.
 
 ## Why this exists
 

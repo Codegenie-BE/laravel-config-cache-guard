@@ -3,7 +3,7 @@
     "description": "Prevent Laravel from using stale config or route cache after deployment changes, with Composer autoload integration and in-app auto repair for shared hosting.",
     "type": "library",
     "license": "MIT",
-    "homepage": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
+    "homepage": "https://codegenie-be.github.io/laravel-config-cache-guard/",
     "keywords": [
         "laravel",
         "laravel-config",
