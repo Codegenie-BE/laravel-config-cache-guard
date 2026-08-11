@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Codegenie\ConfigCacheGuard\Support\Environment;
+
 function makeGuardRuntimeProject(): array
 {
     $basePath = sys_get_temp_dir().'/config-cache-guard-'.bin2hex(random_bytes(8));
@@ -48,6 +50,7 @@ function removeGuardRuntimeProject(string $path): void
 function resetGuardRuntimeEnvironment(): void
 {
     foreach ([
+        'APP_ENV',
         'CONFIG_CACHE_GUARD_ENABLED',
         'CONFIG_CACHE_GUARD_CONFIG',
         'CONFIG_CACHE_GUARD_ROUTES',
@@ -59,12 +62,19 @@ function resetGuardRuntimeEnvironment(): void
         'CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE',
         'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
         'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE',
+        'APP_CONFIG_CACHE',
         'APP_ROUTES_CACHE',
         'PHP_CLI_BINARY',
     ] as $name) {
         putenv($name);
         unset($_ENV[$name], $_SERVER[$name]);
     }
+
+    unset(
+        $GLOBALS['__codegenie_config_cache_guard_loaded'],
+        $GLOBALS['__codegenie_config_cache_guard_external_environment'],
+        $GLOBALS['__codegenie_config_cache_guard_external_app_env']
+    );
 }
 
 it('does nothing when the guard is disabled', function (): void {
@@ -93,40 +103,49 @@ it('removes stale cached config during the failure cooldown', function (): void 
         $failedPath = $basePath.'/bootstrap/cache/config-cache-refresh.failed';
 
         file_put_contents($cachedConfigPath, '<?php return [];');
-        touch($failedPath, time());
+        file_put_contents($failedPath, "reason=artisan_command_failed\n");
+        $failedAt = time() - 10;
+        touch($failedPath, $failedAt);
 
         putenv('CONFIG_CACHE_GUARD_ENABLED');
         putenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN=60');
 
         include $guardPath;
+        clearstatcache(true, $failedPath);
 
         expect(is_file($cachedConfigPath))->toBeFalse();
-        expect((string) file_get_contents($failedPath))->toContain('reason=recent_failure_cooldown');
+        expect((string) file_get_contents($failedPath))->toBe("reason=artisan_command_failed\n");
+        expect(filemtime($failedPath))->toBe($failedAt);
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
     }
 });
 
-it('removes stale cached routes during the route failure cooldown', function (): void {
+it('bypasses stale cached routes during the route failure cooldown without extending the cooldown', function (): void {
     [$basePath, $guardPath] = makeGuardRuntimeProject();
 
     try {
         $cachedRoutePath = $basePath.'/bootstrap/cache/routes-v7.php';
         $failedPath = $basePath.'/bootstrap/cache/route-cache-refresh.failed';
+        $marker = "reason=artisan_command_failed\n";
 
         file_put_contents($cachedRoutePath, '<?php return [];');
-        touch($failedPath, time());
+        file_put_contents($failedPath, $marker);
+        $failedAt = time() - 10;
+        touch($failedPath, $failedAt);
 
         putenv('CONFIG_CACHE_GUARD_CONFIG=false');
         putenv('CONFIG_CACHE_GUARD_ROUTES=true');
         putenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN=60');
 
         include $guardPath;
+        clearstatcache(true, $failedPath);
 
         expect(is_file($cachedRoutePath))->toBeTrue();
         expect(getenv('APP_ROUTES_CACHE'))->toBeString();
-        expect((string) file_get_contents($failedPath))->toContain('reason=recent_failure_cooldown');
+        expect((string) file_get_contents($failedPath))->toBe($marker);
+        expect(filemtime($failedPath))->toBe($failedAt);
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
@@ -226,6 +245,8 @@ it('points Laravel at a versioned route cache path when cached routes become sta
         expect($routeCachePath)->toBeString();
         expect($routeCachePath)->toStartWith('bootstrap/cache/routes-');
         expect($routeCachePath)->not->toBe('bootstrap/cache/routes-v7.php');
+        expect(Environment::string('APP_ROUTES_CACHE'))
+            ->toBe($routeCachePath);
         expect(is_file($staleRoutePath))->toBeTrue();
         expect(is_file($pendingPath))->toBeTrue();
     } finally {
@@ -252,6 +273,8 @@ it('removes the stale legacy route cache when versioned route cache files are di
         include $guardPath;
 
         expect(getenv('APP_ROUTES_CACHE'))->toBeFalse();
+        expect(Environment::string('APP_ROUTES_CACHE'))
+            ->toBeNull();
         expect(is_file($staleRoutePath))->toBeFalse();
         expect(is_file($basePath.'/bootstrap/cache/route-cache-refresh.pending'))->toBeTrue();
     } finally {
@@ -392,6 +415,180 @@ it('does not create config cache when no cached config file exists by default', 
         expect(is_file($basePath.'/bootstrap/cache/config.php'))->toBeFalse();
         expect(is_file($basePath.'/bootstrap/cache/config-cache-refresh.pending'))->toBeFalse();
         expect(is_file($basePath.'/bootstrap/cache/config-cache-refresh.failed'))->toBeFalse();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('queues a safe retry when a rebuilt cache signature cannot be stored', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/bootstrap/cache';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $pendingPath = $cachePath.'/config-cache-refresh.pending';
+
+        file_put_contents($cachedConfigPath, '<?php return [];');
+        mkdir($cachePath.'/config-source.signature');
+        file_put_contents(
+            $basePath.'/artisan',
+            <<<'ARTISAN'
+#!/usr/bin/env php
+<?php
+file_put_contents(__DIR__.'/bootstrap/cache/config.php', '<?php return [];');
+exit(0);
+ARTISAN
+        );
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($cachedConfigPath))->toBeFalse();
+        expect((string) file_get_contents($pendingPath))
+            ->toContain('reason=signature_write_failed');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('guards a custom config cache path provided through the process environment', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $customCachePath = $basePath.'/storage/framework/custom-config.php';
+        $pendingPath = $basePath.'/bootstrap/cache/config-cache-refresh.pending';
+
+        mkdir(dirname($customCachePath), 0777, true);
+        file_put_contents($customCachePath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('APP_CONFIG_CACHE=storage/framework/custom-config.php');
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($customCachePath))->toBeFalse();
+        expect(is_file($basePath.'/bootstrap/cache/config.php'))->toBeFalse();
+        expect((string) file_get_contents($pendingPath))->toContain('reason=artisan_command_failed');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('uses the Laravel 13 dot-laravel cache directory when present', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/.laravel/cache';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $pendingPath = $cachePath.'/config-cache-refresh.pending';
+
+        mkdir($cachePath, 0777, true);
+        file_put_contents($cachedConfigPath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($cachedConfigPath))->toBeFalse();
+        expect(is_file($pendingPath))->toBeTrue();
+        expect(is_file($basePath.'/bootstrap/cache/config-cache-refresh.pending'))->toBeFalse();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('queues repair safely when the cache lock cannot be opened', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/bootstrap/cache';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $pendingPath = $cachePath.'/config-cache-refresh.pending';
+
+        file_put_contents($cachedConfigPath, '<?php return [];');
+        mkdir($cachePath.'/config-cache-refresh.lock');
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($cachedConfigPath))->toBeFalse();
+        expect((string) file_get_contents($pendingPath))->toContain('reason=lock_unavailable');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('stops safely when a stale config cache file cannot be removed', function (): void {
+    if (! is_file('/proc/self/status')) {
+        expect(true)->toBeTrue();
+
+        return;
+    }
+
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+
+        putenv('APP_CONFIG_CACHE=/proc/self/status');
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        expect(static fn () => include $guardPath)
+            ->toThrow(RuntimeException::class, 'could not remove the unsafe cache file');
+
+        expect((string) file_get_contents($basePath.'/bootstrap/cache/config-cache-refresh.failed'))
+            ->toContain('reason=stale_cache_removal_failed');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('retries an expired failed config repair even after the stale cache was removed', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/bootstrap/cache';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $failedPath = $cachePath.'/config-cache-refresh.failed';
+
+        file_put_contents($failedPath, "reason=auto_repair_failed\n");
+        touch($failedPath, time() - 120);
+        file_put_contents(
+            $basePath.'/artisan',
+            "#!/usr/bin/env php\n<?php file_put_contents(__DIR__.'/bootstrap/cache/config.php', '<?php return [];'); exit(0);\n"
+        );
+
+        putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+        putenv('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN=60');
+
+        include $guardPath;
+
+        expect(is_file($cachedConfigPath))->toBeTrue();
+        expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
+        expect(is_file($failedPath))->toBeFalse();
+        expect(is_file($cachePath.'/config-cache-refresh.succeeded'))->toBeTrue();
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);

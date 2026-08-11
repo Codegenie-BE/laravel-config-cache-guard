@@ -50,7 +50,7 @@ jobs:
           tools: composer:v2
 
       - name: Validate composer.json
-        run: composer validate --strict
+        run: composer check:composer
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -73,13 +73,38 @@ jobs:
         run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction
 
       - name: Audit dependencies
-        run: composer audit --no-interaction
+        run: composer check:security
+
+      - name: Validate optimized autoload
+        run: composer check:autoload
 
       - name: Run Pint
-        run: vendor/bin/pint --test
+        run: composer format:test
 
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse --memory-limit=512M
+        run: composer analyse
 
       - name: Run tests
-        run: vendor/bin/pest
+        run: composer test
+
+  windows-portability:
+    name: Windows / PHP 8.2 / Laravel 12
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Install locked dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run all quality gates
+        run: composer check

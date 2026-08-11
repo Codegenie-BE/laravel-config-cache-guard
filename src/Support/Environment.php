@@ -21,6 +21,16 @@ final class Environment
 
     public static function string(string $name): ?string
     {
+        $capturedEnvironment = $GLOBALS['__codegenie_config_cache_guard_external_environment'] ?? null;
+
+        if (is_array($capturedEnvironment) && array_key_exists($name, $capturedEnvironment)) {
+            $capturedValue = $capturedEnvironment[$name];
+
+            return is_string($capturedValue) && $capturedValue !== ''
+                ? $capturedValue
+                : null;
+        }
+
         $value = getenv($name);
 
         if (is_string($value) && $value !== '') {
