@@ -19,6 +19,14 @@ jobs:
             laravel: '12'
             testbench: '^10.0'
             pest: '^3.0'
+          - php: '8.3'
+            laravel: '12'
+            testbench: '^10.0'
+            pest: '^3.0'
+          - php: '8.4'
+            laravel: '12'
+            testbench: '^10.0'
+            pest: '^3.0'
           - php: '8.5'
             laravel: '12'
             testbench: '^10.0'
@@ -51,6 +59,9 @@ jobs:
 
       - name: Validate composer.json
         run: composer check:composer
+
+      - name: Validate supported runtime versions
+        run: composer check:support
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -108,3 +119,56 @@ jobs:
 
       - name: Run all quality gates
         run: composer check
+
+  end-to-end:
+    name: E2E / ${{ matrix.platform }} / PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            php: '8.2'
+            laravel: '12'
+          - os: ubuntu-latest
+            platform: Linux
+            php: '8.3'
+            laravel: '13'
+          - os: windows-latest
+            platform: Windows
+            php: '8.2'
+            laravel: '12'
+
+    env:
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+      COMPOSER_PROCESS_TIMEOUT: 0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.COMPOSER_CACHE_DIR }}
+          key: e2e-${{ runner.os }}-php-${{ matrix.php }}-laravel-${{ matrix.laravel }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            e2e-${{ runner.os }}-php-${{ matrix.php }}-laravel-${{ matrix.laravel }}-
+            e2e-${{ runner.os }}-php-${{ matrix.php }}-
+
+      - name: Install package development dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run real Laravel application end-to-end tests
+        run: composer test:e2e -- --laravel=${{ matrix.laravel }}

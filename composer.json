@@ -46,7 +46,8 @@
         "larastan/larastan": "^3.10",
         "laravel/pint": "^1.0",
         "orchestra/testbench": "^10.0|^11.0",
-        "pestphp/pest": "^3.0|^4.0"
+        "pestphp/pest": "^3.0|^4.0",
+        "symfony/process": "^7.2|^8.0"
     },
     "autoload": {
         "psr-4": {
@@ -71,6 +72,7 @@
     "scripts": {
         "analyse": "phpstan analyse --memory-limit=512M",
         "check": [
+            "@check:support",
             "@check:composer",
             "@check:security",
             "@check:autoload",
@@ -78,12 +80,18 @@
             "@analyse",
             "@test"
         ],
+        "check:release": [
+            "@check",
+            "@test:e2e"
+        ],
         "check:autoload": "@composer dump-autoload --optimize --strict-psr --no-interaction",
         "check:composer": "@composer validate --strict",
         "check:security": "@composer audit --no-interaction",
+        "check:support": "@php tests/Support/validate.php",
         "format": "pint",
         "format:test": "pint --test",
-        "test": "pest"
+        "test": "pest",
+        "test:e2e": "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
@@ -96,11 +104,14 @@
     "scripts-descriptions": {
         "analyse": "Run PHPStan at the configured maximum level.",
         "check": "Run every local quality gate in the same order as CI.",
+        "check:release": "Run the fast quality gate and real Laravel 12/13 application end-to-end tests.",
         "check:autoload": "Generate an optimized autoloader and enforce strict PSR mappings.",
         "check:composer": "Validate composer.json and lock-file consistency strictly.",
         "check:security": "Audit the resolved dependency set for known security advisories.",
+        "check:support": "Fail when Composer or CI still references an end-of-life PHP or Laravel version.",
         "format": "Apply Laravel Pint formatting.",
         "format:test": "Check Laravel Pint formatting without changing files.",
-        "test": "Run the Pest test suite."
+        "test": "Run the Pest test suite.",
+        "test:e2e": "Install the package into fresh Laravel applications and test real cache repair over HTTP."
     }
 }
