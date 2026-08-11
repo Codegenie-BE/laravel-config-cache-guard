@@ -511,7 +511,7 @@ composer install
 composer check
 ```
 
-`composer check` validates that no configured PHP or Laravel branch is EOL, then runs strict Composer validation, the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
+`composer check` validates that no configured PHP or Laravel branch is EOL, runs strict Composer validation, builds and inspects the package distribution archive, then runs the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The archive check rejects leaked development files, documentation, tests or vendor dependencies and verifies that every runtime file remains present. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:distribution`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
 
 Run the real application end-to-end suite before a release:
 
@@ -520,9 +520,9 @@ composer test:e2e
 composer check:release
 ```
 
-`composer test:e2e` creates temporary fresh Laravel 12 and 13 applications, installs this checkout through a copied Composer path repository, builds real config and route caches, and sends HTTP requests through PHP's built-in server. It verifies pre-bootstrap CLI repair, the `exec()`-disabled in-app fallback, a custom `APP_CONFIG_CACHE` path and Laravel 13 with `.laravel` as its active bootstrap path. The temporary applications are removed automatically. Use `composer test:e2e -- --laravel=12` to run one framework version or add `--keep` to retain a failing fixture for inspection.
+`composer test:e2e` creates temporary fresh Laravel 12 and 13 applications, installs this checkout through a copied Composer path repository, builds real config and route caches, and sends HTTP requests through PHP's built-in server. It verifies pre-bootstrap CLI repair, the `exec()`-disabled in-app fallback, a custom `APP_CONFIG_CACHE` path and Laravel 13 with `.laravel` as its active bootstrap path. The temporary applications are removed automatically. Composer's default process timeout is disabled only for this network-heavy E2E command. Use `composer test:e2e -- --laravel=12` to run one framework version or add `--keep` to retain a failing fixture for inspection.
 
-GitHub Actions validates every supported Laravel/PHP combination on Linux, runs the lowest supported Laravel 12/PHP 8.2 quality gate on Windows, and executes real application E2E jobs for Laravel 12 and 13 on Linux plus Laravel 12 on Windows. The E2E jobs require Composer network access because they deliberately install clean framework applications.
+GitHub Actions validates every supported Laravel/PHP combination on Linux, runs the lowest supported Laravel 12/PHP 8.2 quality gate on Windows, and executes real application E2E jobs for Laravel 12 and 13 on both Linux and Windows. The E2E jobs require Composer network access because they deliberately install clean framework applications.
 
 ## Uninstall
 

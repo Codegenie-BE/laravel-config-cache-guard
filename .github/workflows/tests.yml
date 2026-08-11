@@ -86,6 +86,10 @@ jobs:
       - name: Audit dependencies
         run: composer check:security
 
+      - name: Validate package distribution
+        if: matrix.php == '8.2' && matrix.laravel == '12'
+        run: composer check:distribution
+
       - name: Validate optimized autoload
         run: composer check:autoload
 
@@ -141,6 +145,10 @@ jobs:
             platform: Windows
             php: '8.2'
             laravel: '12'
+          - os: windows-latest
+            platform: Windows
+            php: '8.3'
+            laravel: '13'
 
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache

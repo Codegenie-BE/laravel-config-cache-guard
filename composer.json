@@ -37,6 +37,23 @@
         "issues": "https://github.com/Codegenie-BE/laravel-config-cache-guard/issues",
         "source": "https://github.com/Codegenie-BE/laravel-config-cache-guard"
     },
+    "archive": {
+        "exclude": [
+            "/.github",
+            "/docs",
+            "/tests",
+            "/vendor",
+            "/.gitattributes",
+            "/.gitignore",
+            "/ADOPTERS.md",
+            "/CODE_OF_CONDUCT.md",
+            "/CONTRIBUTING.md",
+            "/SUPPORT.md",
+            "/composer.lock",
+            "/phpstan.neon",
+            "/phpunit.xml"
+        ]
+    },
     "require": {
         "php": "^8.2",
         "illuminate/console": "^12.0|^13.0",
@@ -74,6 +91,7 @@
         "check": [
             "@check:support",
             "@check:composer",
+            "@check:distribution",
             "@check:security",
             "@check:autoload",
             "@format:test",
@@ -86,12 +104,19 @@
         ],
         "check:autoload": "@composer dump-autoload --optimize --strict-psr --no-interaction",
         "check:composer": "@composer validate --strict",
+        "check:distribution": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php tests/Support/distribution.php"
+        ],
         "check:security": "@composer audit --no-interaction",
         "check:support": "@php tests/Support/validate.php",
         "format": "pint",
         "format:test": "pint --test",
         "test": "pest",
-        "test:e2e": "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
+        "test:e2e": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
+        ]
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
@@ -107,6 +132,7 @@
         "check:release": "Run the fast quality gate and real Laravel 12/13 application end-to-end tests.",
         "check:autoload": "Generate an optimized autoloader and enforce strict PSR mappings.",
         "check:composer": "Validate composer.json and lock-file consistency strictly.",
+        "check:distribution": "Build and inspect the Composer archive so development files and vendor dependencies cannot leak into releases.",
         "check:security": "Audit the resolved dependency set for known security advisories.",
         "check:support": "Fail when Composer or CI still references an end-of-life PHP or Laravel version.",
         "format": "Apply Laravel Pint formatting.",
