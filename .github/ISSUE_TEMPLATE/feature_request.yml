@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement for a real deployment problem.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Deployment problem
+      description: What cannot be handled safely with the current behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: current_workaround
+    attributes:
+      label: Current workaround
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the user-visible result; implementation suggestions are optional.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This concerns stale Laravel deployment cache rather than general application, view, Redis or OPcache management.
+          required: true

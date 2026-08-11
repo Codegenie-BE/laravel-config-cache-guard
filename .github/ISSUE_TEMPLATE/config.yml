@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions and hosting feedback
+    url: https://github.com/Codegenie-BE/laravel-config-cache-guard/discussions
+    about: Ask for help or share a hosting experience in Discussions.
+  - name: Private security report
+    url: https://github.com/Codegenie-BE/laravel-config-cache-guard/security/advisories/new
+    about: Report vulnerabilities privately. Never open a public security issue.

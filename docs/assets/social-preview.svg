@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Laravel Config Cache Guard</title>
+  <desc id="description">Reject stale deployment cache before Laravel boots.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#1d1537"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="85%" cy="15%" r="70%">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+  <g transform="translate(90 90)">
+    <rect width="78" height="78" rx="18" fill="#6d28d9"/>
+    <path d="M20 29h38M20 39h38M20 49h24" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+    <path d="m51 48 8 8 15-19" fill="none" stroke="#a7f3d0" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="90" y="235" fill="#c4b5fd" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="3">LARAVEL 12–13 · PHP 8.2–8.5</text>
+  <text x="90" y="325" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="66" font-weight="800">Config Cache Guard</text>
+  <text x="90" y="395" fill="#dbe4f2" font-family="Segoe UI, Arial, sans-serif" font-size="32">Reject stale deployment cache before Laravel boots.</text>
+  <g transform="translate(90 460)">
+    <rect width="820" height="86" rx="14" fill="#080c17" stroke="#34405a"/>
+    <text x="28" y="54" fill="#a78bfa" font-family="Consolas, monospace" font-size="26">$</text>
+    <text x="64" y="54" fill="#f1f5f9" font-family="Consolas, monospace" font-size="26">composer require codegenie-be/laravel-config-cache-guard</text>
+  </g>
+</svg>
