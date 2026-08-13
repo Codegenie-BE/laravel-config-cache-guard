@@ -1,13 +1,15 @@
 <?php
 
 declare(strict_types=1);
+use Codegenie\ConfigCacheGuard\Support\AtomicFile;
+use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 
 /**
  * Codegenie Laravel Config Cache Guard
  *
- * This file is loaded by Composer before Laravel bootstraps. It intentionally
- * avoids Laravel classes so it can safely remove stale deployment cache files
- * before Laravel has a chance to load them.
+ * This file is loaded by Composer before Laravel bootstraps. It only uses
+ * framework-free package support classes, so it can safely remove stale
+ * deployment cache files before Laravel has a chance to load them.
  */
 $definedVariables = get_defined_vars();
 $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
@@ -52,6 +54,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE',
             'CONFIG_CACHE_GUARD_PHP_BINARY',
             'CONFIG_CACHE_GUARD_ROUTES',
+            'CONFIG_CACHE_GUARD_SIGNATURE_MODE',
             'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
             'PHP_CLI_BINARY',
         ] as $environmentName) {
@@ -197,104 +200,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
     $failHard = $envFlagEnabled('CONFIG_CACHE_GUARD_FAIL_HARD', false);
     $autoRepair = $envFlagEnabled('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
     $createConfigWhenMissing = $envFlagEnabled('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
+    $signatureMode = strtolower($envString('CONFIG_CACHE_GUARD_SIGNATURE_MODE') ?? 'metadata');
 
-    /**
-     * @return list<string>
-     */
-    $collectPhpFiles = static function (string $directory): array {
-        if (! is_dir($directory)) {
-            return [];
-        }
-
-        $files = [];
-
-        try {
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS)
-            );
-
-            foreach ($iterator as $file) {
-                if (
-                    $file instanceof SplFileInfo
-                    && $file->isFile()
-                    && strtolower($file->getExtension()) === 'php'
-                ) {
-                    $files[] = $file->getPathname();
-                }
-            }
-        } catch (Throwable) {
-            return [];
-        }
-
-        return $files;
-    };
-
-    /**
-     * @return list<string>
-     */
-    $envFiles = static function () use ($basePath, $envString): array {
-        $files = [];
-        $envPath = $basePath.'/.env';
-
-        if (is_file($envPath)) {
-            $files[] = $envPath;
-        }
-
-        $externalAppEnv = $envString('APP_ENV');
-
-        if ($externalAppEnv !== null) {
-            $environmentEnvPath = $basePath.'/.env.'.$externalAppEnv;
-
-            if (is_file($environmentEnvPath)) {
-                $files[] = $environmentEnvPath;
-            }
-        }
-
-        return $files;
-    };
-
-    /**
-     * @param  array<int, mixed>  $files
-     */
-    $buildSignature = static function (array $files) use ($basePath): ?string {
-        $validFiles = [];
-
-        foreach ($files as $file) {
-            if (is_string($file) && is_file($file)) {
-                $validFiles[] = $file;
-            }
-        }
-
-        $files = array_values(array_unique($validFiles));
-
-        if ($files === []) {
-            return null;
-        }
-
-        sort($files, SORT_STRING);
-
-        $parts = [];
-
-        foreach ($files as $file) {
-            $stats = @stat($file);
-
-            if (! is_array($stats)) {
-                return null;
-            }
-
-            $parts[] = implode('|', [
-                str_starts_with($file, $basePath.'/') ? str_replace($basePath.'/', '', $file) : $file,
-                (string) $stats['mtime'],
-                (string) $stats['ctime'],
-                (string) $stats['size'],
-                (string) $stats['ino'],
-            ]);
-        }
-
-        $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
-
-        return hash($algorithm, implode("\n", $parts));
-    };
+    if (! in_array($signatureMode, ['metadata', 'content'], true)) {
+        $signatureMode = 'metadata';
+    }
 
     $readSignature = static function (string $path): ?string {
         if (! is_file($path)) {
@@ -311,48 +221,11 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
     };
 
     $writeFileAtomically = static function (string $path, string $contents): bool {
-        $directory = dirname($path);
-
-        if (! is_dir($directory)) {
-            return false;
-        }
-
-        $temporaryPath = @tempnam($directory, '.config-cache-guard-');
-
-        if ($temporaryPath === false) {
-            return false;
-        }
-
-        try {
-            $written = @file_put_contents($temporaryPath, $contents, LOCK_EX);
-
-            if ($written !== strlen($contents)) {
-                return false;
-            }
-
-            if (! @rename($temporaryPath, $path)) {
-                if (is_file($path) && ! @unlink($path)) {
-                    return false;
-                }
-
-                if (! @rename($temporaryPath, $path)) {
-                    return false;
-                }
-            }
-
-            clearstatcache(true, $path);
-            $storedContents = @file_get_contents($path);
-
-            return is_string($storedContents) && hash_equals($contents, $storedContents);
-        } finally {
-            if (is_file($temporaryPath)) {
-                @unlink($temporaryPath);
-            }
-        }
+        return AtomicFile::write($path, $contents);
     };
 
-    $writeSignature = static function (string $path, string $signature) use ($writeFileAtomically): bool {
-        return $writeFileAtomically($path, $signature);
+    $writeSignature = static function (string $path, string $signature): bool {
+        return DeploymentCacheSignatures::write($path, $signature);
     };
 
     $invalidateOpcache = static function (string $path): void {
@@ -651,6 +524,12 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return is_array($values) ? $values : [];
     };
 
+    $signatureFromCallback = static function (callable $callback): ?string {
+        $signature = $callback();
+
+        return is_string($signature) && $signature !== '' ? $signature : null;
+    };
+
     $resolveCachePath = static function (string $path) use ($basePath): string {
         if (
             str_starts_with($path, '/')
@@ -677,30 +556,9 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         : $cacheDir.'/config.php';
 
     /**
-     * @return list<string>
-     */
-    $deploymentSourceFiles = static function () use ($basePath, $bootstrapPath, $collectPhpFiles): array {
-        $files = $collectPhpFiles($basePath.'/app/Providers');
-
-        foreach ([
-            $basePath.'/composer.json',
-            $basePath.'/composer.lock',
-            $bootstrapPath.'/app.php',
-            $bootstrapPath.'/providers.php',
-        ] as $sourceFile) {
-            if (is_file($sourceFile)) {
-                $files[] = $sourceFile;
-            }
-        }
-
-        return $files;
-    };
-
-    /**
      * @param  array<string, mixed>  $target
      */
     $refreshDeploymentCache = static function (array $target) use (
-        $buildSignature,
         $readSignature,
         $writeSignature,
         $removeCachedFiles,
@@ -712,6 +570,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $resolvePhpBinary,
         $runArtisan,
         $arrayFromCallback,
+        $signatureFromCallback,
         $failureCooldownSeconds,
         $writeSuccessMarker,
         $showFailure,
@@ -724,12 +583,13 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $createWhenMissing = ($target['create_when_missing'] ?? false) === true;
         $failedPath = $target['failed_path'] ?? null;
         $failOnRecentFailure = ($target['fail_on_recent_failure'] ?? true) !== false;
+        $initialSignature = $target['initial_signature'] ?? null;
         $lockPath = $target['lock_path'] ?? null;
         $name = $target['name'] ?? null;
         $pendingPath = $target['pending_path'] ?? null;
         $removeCachedFilesWhenPending = ($target['remove_cached_files_when_pending'] ?? true) === true;
+        $signatureCallback = $target['signature'] ?? null;
         $signaturePath = $target['signature_path'] ?? null;
-        $sourceFilesCallback = $target['source_files'] ?? null;
 
         if (! is_callable($cleanupFilesCallback)) {
             $cleanupFilesCallback = static fn (): array => [];
@@ -743,13 +603,14 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             || ! is_string($name)
             || ! is_string($pendingPath)
             || ! is_string($signaturePath)
-            || ! is_callable($sourceFilesCallback)
+            || ! is_callable($signatureCallback)
         ) {
             return;
         }
 
-        $sourceFiles = $arrayFromCallback($sourceFilesCallback);
-        $currentSignature = $buildSignature($sourceFiles);
+        $currentSignature = is_string($initialSignature)
+            ? $initialSignature
+            : $signatureFromCallback($signatureCallback);
 
         if ($currentSignature === null) {
             return;
@@ -832,8 +693,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
             clearstatcache();
 
-            $sourceFiles = $arrayFromCallback($sourceFilesCallback);
-            $currentSignature = $buildSignature($sourceFiles);
+            $currentSignature = $signatureFromCallback($signatureCallback);
 
             if ($currentSignature === null) {
                 return;
@@ -1011,14 +871,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 'lock_path' => $cacheDir.'/config-cache-refresh.lock',
                 'name' => 'config',
                 'pending_path' => $cacheDir.'/config-cache-refresh.pending',
+                'signature' => static fn (): ?string => DeploymentCacheSignatures::config($basePath, $signatureMode),
                 'signature_path' => $cacheDir.'/config-source.signature',
-                'source_files' => static function () use ($collectPhpFiles, $configDir, $deploymentSourceFiles, $envFiles): array {
-                    return array_merge(
-                        $collectPhpFiles($configDir),
-                        $deploymentSourceFiles(),
-                        $envFiles()
-                    );
-                },
             ]);
         }
     }
@@ -1049,17 +903,8 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
             return array_values(array_unique(array_filter($files, 'is_string')));
         };
-        $routeSourceFiles = static function () use ($basePath, $collectPhpFiles, $deploymentSourceFiles, $envFiles): array {
-            return array_merge(
-                $collectPhpFiles($basePath.'/config'),
-                $collectPhpFiles($basePath.'/routes'),
-                $deploymentSourceFiles(),
-                $envFiles()
-            );
-        };
-
         if ($routeCacheFiles() !== []) {
-            $routeSignature = $buildSignature($routeSourceFiles());
+            $routeSignature = DeploymentCacheSignatures::routes($basePath, $signatureMode);
             $canManageRouteCachePath = $configuredRouteCachePath === null
                 || $isManagedRouteCachePath($configuredRouteCachePath);
             $routeCachePath = $configuredRouteCachePath !== null
@@ -1088,12 +933,13 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 )),
                 'create_when_missing' => $createRouteCacheWhenMissing,
                 'failed_path' => $cacheDir.'/route-cache-refresh.failed',
+                'initial_signature' => $routeSignature,
                 'lock_path' => $cacheDir.'/route-cache-refresh.lock',
                 'name' => 'route',
                 'pending_path' => $cacheDir.'/route-cache-refresh.pending',
                 'remove_cached_files_when_pending' => ! $routeCacheWillBeBypassed,
+                'signature' => static fn (): ?string => DeploymentCacheSignatures::routes($basePath, $signatureMode),
                 'signature_path' => $cacheDir.'/route-source.signature',
-                'source_files' => $routeSourceFiles,
             ]);
         }
     }

@@ -4,6 +4,12 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+- Added a stable aggregate `CI gate`, immutable commit-SHA Action references, minimum-dependency jobs, an enforced coverage baseline and bounded timeouts for every job.
+- Added repository Secret Scanning, Push Protection and Dependabot security updates.
+- Added optional content-based source signatures for deployment tools that preserve file metadata during same-size rewrites.
+- Shared atomic writes and signature calculation between pre-bootstrap and deferred repair paths, and reused the initial route signature within a request.
+- Added a real two-process repair-lock regression test that runs across the complete platform matrix.
+- Added a signed-tag release workflow that validates releases, publishes ZIP and SHA-256 artifacts and records build provenance.
 - Added a Composer distribution gate that builds the release archive, verifies every runtime file and rejects leaked development, documentation or vendor files.
 - Disabled Composer's five-minute process timeout only for the real Laravel E2E script, so `composer check:release` can complete reliably on slower machines without weakening other command timeouts.
 - Expanded both the package suite and real-application E2E coverage to every supported PHP/Laravel pair across Linux x64, Windows x64, macOS ARM64, Linux ARM64 and Alpine Linux x64.

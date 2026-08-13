@@ -19,6 +19,7 @@ It is designed to prevent Laravel from using stale deployment cache files withou
 The package may:
 
 - compare file metadata for `.env`, `.env.{APP_ENV}`, config files, route files, application providers, active bootstrap registration files and Composer dependency metadata
+- optionally hash those source-file contents in memory when `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content`; only the aggregate one-way signature is persisted
 - remove stale config cache from Laravel's active cache path, including an externally configured `APP_CONFIG_CACHE` path
 - remove or bypass stale route cache in Laravel's active bootstrap cache directory
 - run fixed deployment-cache commands through PHP CLI when `exec()` is available
@@ -32,7 +33,7 @@ The package may:
 
 The package does not:
 
-- read, log or store `.env` values
+- log or store `.env` values; content-signature mode reads file bytes only to calculate a one-way hash
 - snapshot arbitrary environment variables or persist the documented control-variable snapshot to disk
 - store secrets, tokens, cookies or authorization headers
 - send data to external services

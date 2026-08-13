@@ -111,3 +111,30 @@ it('uses Laravel 13 dot-laravel bootstrap sources when that directory exists', f
         removeSignatureRuntimeProject($basePath);
     }
 });
+
+it('can detect same-size rewrites through content signatures', function (): void {
+    $basePath = makeSignatureRuntimeProject();
+
+    try {
+        $configPath = $basePath.'/config/app.php';
+        $originalMtime = filemtime($configPath);
+        $initial = DeploymentCacheSignatures::config($basePath, 'content');
+        $originalContents = (string) file_get_contents($configPath);
+        $changedContents = str_replace('Codegenie', 'Guardrail', $originalContents);
+
+        expect(strlen($changedContents))->toBe(strlen($originalContents));
+
+        file_put_contents($configPath, $changedContents);
+
+        if (is_int($originalMtime)) {
+            touch($configPath, $originalMtime);
+        }
+
+        clearstatcache(true, $configPath);
+
+        expect(DeploymentCacheSignatures::config($basePath, 'content'))
+            ->not->toBe($initial);
+    } finally {
+        removeSignatureRuntimeProject($basePath);
+    }
+});
