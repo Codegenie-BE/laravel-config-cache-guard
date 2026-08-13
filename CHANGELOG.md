@@ -6,7 +6,9 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 - Added a Composer distribution gate that builds the release archive, verifies every runtime file and rejects leaked development, documentation or vendor files.
 - Disabled Composer's five-minute process timeout only for the real Laravel E2E script, so `composer check:release` can complete reliably on slower machines without weakening other command timeouts.
-- Added a Windows Laravel 13 E2E job so both supported Laravel majors are exercised on Linux and Windows.
+- Expanded both the package suite and real-application E2E coverage to every supported PHP/Laravel pair across Linux x64, Windows x64, macOS ARM64, Linux ARM64 and Alpine Linux x64.
+- Added an official-PHP Alpine Docker test environment for musl-based container portability.
+- Strengthened support-policy validation so missing platforms, runners, runtime pairs, Alpine infrastructure or incorrect Testbench and Pest pins fail CI.
 
 ## v1.3.1 - 2026-08-11
 

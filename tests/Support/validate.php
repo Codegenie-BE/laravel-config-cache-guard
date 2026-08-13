@@ -78,6 +78,8 @@ foreach ($workflowLaravel as $version) {
     }
 }
 
+$expectedRuntimePairs = [];
+
 foreach ($nonEolLaravel as $laravelVersion) {
     $laravelPolicy = $policy['laravel'][$laravelVersion];
 
@@ -86,10 +88,147 @@ foreach ($nonEolLaravel as $laravelVersion) {
             continue;
         }
 
-        $matrixEntry = "- php: '".$phpVersion."'\n            laravel: '".$laravelVersion."'";
+        $expectedRuntimePairs[] = [$phpVersion, $laravelVersion];
+    }
+}
 
-        if (! str_contains($workflow, $matrixEntry)) {
-            $errors[] = 'The primary CI matrix is missing PHP '.$phpVersion.' / Laravel '.$laravelVersion.'.';
+$jobSection = static function (string $workflow, string $job, ?string $nextJob = null): string {
+    $startMarker = '  '.$job.':';
+    $start = strpos($workflow, $startMarker);
+
+    if ($start === false) {
+        return '';
+    }
+
+    if ($nextJob === null) {
+        return substr($workflow, $start);
+    }
+
+    $end = strpos($workflow, '  '.$nextJob.':', $start + strlen($startMarker));
+
+    return $end === false
+        ? substr($workflow, $start)
+        : substr($workflow, $start, $end - $start);
+};
+
+$jobs = [
+    'native package tests' => $jobSection($workflow, 'tests', 'end-to-end'),
+    'native E2E tests' => $jobSection($workflow, 'end-to-end', 'alpine-tests'),
+    'Alpine package tests' => $jobSection($workflow, 'alpine-tests', 'alpine-end-to-end'),
+    'Alpine E2E tests' => $jobSection($workflow, 'alpine-end-to-end'),
+];
+
+foreach ($jobs as $label => $job) {
+    if ($job === '') {
+        $errors[] = 'The GitHub Actions workflow is missing the '.$label.' job.';
+    }
+}
+
+$nativeJobRequirements = [
+    'native package tests' => [
+        'name: Tests / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}',
+        'runs-on: ${{ matrix.platform.runner }}',
+    ],
+    'native E2E tests' => [
+        'name: E2E / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}',
+        'runs-on: ${{ matrix.platform.runner }}',
+    ],
+];
+
+foreach ($nativeJobRequirements as $label => $requirements) {
+    foreach ($requirements as $requirement) {
+        if (! str_contains($jobs[$label], $requirement)) {
+            $errors[] = 'The '.$label.' job must contain: '.$requirement.'.';
+        }
+    }
+}
+
+foreach ($policy['platforms']['native'] as $platform) {
+    $platformEntry = '- name: '.$platform['name']."\n"
+        .'            runner: '.$platform['runner'];
+
+    foreach (['native package tests', 'native E2E tests'] as $label) {
+        if (substr_count($jobs[$label], $platformEntry) !== 1) {
+            $errors[] = 'The '.$label.' matrix must contain '.$platform['name'].' on '
+                .$platform['runner'].' exactly once.';
+        }
+    }
+}
+
+foreach ($expectedRuntimePairs as [$phpVersion, $laravelVersion]) {
+    $testbench = $policy['laravel'][$laravelVersion]['testbench'];
+    $pest = $policy['laravel'][$laravelVersion]['pest'];
+    $packageEntry = "- php: '".$phpVersion."'\n"
+        ."            laravel: '".$laravelVersion."'\n"
+        ."            testbench: '".$testbench."'\n"
+        ."            pest: '".$pest."'";
+    $e2eEntry = "- php: '".$phpVersion."'\n"
+        ."            laravel: '".$laravelVersion."'";
+
+    foreach (['native package tests', 'Alpine package tests'] as $label) {
+        if (substr_count($jobs[$label], $packageEntry) !== 1) {
+            $errors[] = 'The '.$label.' matrix must contain PHP '.$phpVersion.' / Laravel '
+                .$laravelVersion.' with Testbench '.$testbench.' and Pest '.$pest.' exactly once.';
+        }
+    }
+
+    foreach (['native E2E tests', 'Alpine E2E tests'] as $label) {
+        if (substr_count($jobs[$label], $e2eEntry) !== 1) {
+            $errors[] = 'The '.$label.' matrix must contain PHP '.$phpVersion.' / Laravel '
+                .$laravelVersion.' exactly once.';
+        }
+    }
+}
+
+foreach ($jobs as $label => $job) {
+    preg_match_all(
+        '/php:\s*[\'\"](\d+\.\d+)[\'\"]\s*\R\s*laravel:\s*[\'\"](\d+)[\'\"]/m',
+        $job,
+        $matrixPairMatches,
+        PREG_SET_ORDER
+    );
+
+    if (count($matrixPairMatches) !== count($expectedRuntimePairs)) {
+        $errors[] = 'The '.$label.' matrix must contain exactly '.count($expectedRuntimePairs)
+            .' compatible PHP/Laravel runtime entries.';
+    }
+
+    foreach ($matrixPairMatches as $match) {
+        if (! in_array([$match[1], $match[2]], $expectedRuntimePairs, true)) {
+            $errors[] = 'The '.$label.' matrix contains unsupported PHP '
+                .$match[1].' / Laravel '.$match[2].'.';
+        }
+    }
+}
+
+$alpinePlatform = $policy['platforms']['container'][0] ?? null;
+
+if (! is_array($alpinePlatform)) {
+    $errors[] = 'The support policy must define the Alpine container platform.';
+} else {
+    $alpineDockerfile = $repositoryPath.'/'.$alpinePlatform['dockerfile'];
+
+    foreach (['Alpine package tests', 'Alpine E2E tests'] as $label) {
+        foreach ([
+            'runs-on: '.$alpinePlatform['runner'],
+            $alpinePlatform['name'],
+            '--file '.$alpinePlatform['dockerfile'],
+        ] as $requirement) {
+            if (! str_contains($jobs[$label], $requirement)) {
+                $errors[] = 'The '.$label.' job must contain: '.$requirement.'.';
+            }
+        }
+    }
+
+    if (! is_file($alpineDockerfile)) {
+        $errors[] = 'The Alpine CI Dockerfile is missing at '.$alpinePlatform['dockerfile'].'.';
+    } else {
+        $dockerfile = (string) file_get_contents($alpineDockerfile);
+
+        foreach (['ARG PHP_VERSION', 'FROM php:${PHP_VERSION}-cli-alpine', 'FROM composer:2'] as $requirement) {
+            if (! str_contains($dockerfile, $requirement)) {
+                $errors[] = 'The Alpine CI Dockerfile must contain: '.$requirement.'.';
+            }
         }
     }
 }
@@ -105,5 +244,8 @@ if ($errors !== []) {
 fwrite(
     STDOUT,
     '[support-policy] '.$today.': PHP '.implode(', ', $nonEolPhp)
-        .' and Laravel '.implode(', ', $nonEolLaravel).' are non-EOL and fully represented in CI.'.PHP_EOL
+        .' and Laravel '.implode(', ', $nonEolLaravel)
+        .' are non-EOL and fully represented across '.count($policy['platforms']['native'])
+        .' native platforms plus Alpine Linux in both package and E2E CI.'
+        .PHP_EOL
 );
