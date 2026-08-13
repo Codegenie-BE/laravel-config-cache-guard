@@ -8,6 +8,8 @@ on:
       - 'v*'
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
 
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -66,6 +68,27 @@ jobs:
             laravel: '13'
             testbench: '~11.0'
             pest: '~4.0'
+        exclude:
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.3', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.4', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.5', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.3', laravel: '13', testbench: '~11.0', pest: '~4.0'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.4', laravel: '13', testbench: '~11.0', pest: '~4.0'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.3', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.4', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.5', laravel: '12', testbench: '~10.0', pest: '~3.0'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.3', laravel: '13', testbench: '~11.0', pest: '~4.0'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.4', laravel: '13', testbench: '~11.0', pest: '~4.0'}
 
     steps:
       - name: Checkout
@@ -156,6 +179,31 @@ jobs:
             laravel: '13'
           - php: '8.5'
             laravel: '13'
+        exclude:
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.2', laravel: '12'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.3', laravel: '12'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.4', laravel: '12'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.5', laravel: '12'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.3', laravel: '13'}
+          - platform: {name: macOS ARM64, runner: macos-latest}
+            runtime: {php: '8.4', laravel: '13'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.2', laravel: '12'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.3', laravel: '12'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.4', laravel: '12'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.5', laravel: '12'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.3', laravel: '13'}
+          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
+            runtime: {php: '8.4', laravel: '13'}
 
     steps:
       - name: Checkout
@@ -200,26 +248,6 @@ jobs:
             laravel: '12'
             testbench: '~10.0'
             pest: '~3.0'
-          - php: '8.3'
-            laravel: '12'
-            testbench: '~10.0'
-            pest: '~3.0'
-          - php: '8.4'
-            laravel: '12'
-            testbench: '~10.0'
-            pest: '~3.0'
-          - php: '8.5'
-            laravel: '12'
-            testbench: '~10.0'
-            pest: '~3.0'
-          - php: '8.3'
-            laravel: '13'
-            testbench: '~11.0'
-            pest: '~4.0'
-          - php: '8.4'
-            laravel: '13'
-            testbench: '~11.0'
-            pest: '~4.0'
           - php: '8.5'
             laravel: '13'
             testbench: '~11.0'
@@ -263,18 +291,6 @@ jobs:
       fail-fast: false
       matrix:
         runtime:
-          - php: '8.2'
-            laravel: '12'
-          - php: '8.3'
-            laravel: '12'
-          - php: '8.4'
-            laravel: '12'
-          - php: '8.5'
-            laravel: '12'
-          - php: '8.3'
-            laravel: '13'
-          - php: '8.4'
-            laravel: '13'
           - php: '8.5'
             laravel: '13'
 
@@ -348,6 +364,22 @@ jobs:
           composer check:autoload
           composer test
 
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Review dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
+      - name: Skip outside pull requests
+        if: github.event_name != 'pull_request'
+        run: echo "Dependency review only applies to pull requests."
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -383,6 +415,7 @@ jobs:
       - alpine-tests
       - alpine-end-to-end
       - minimum-dependencies
+      - dependency-review
       - coverage
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -434,24 +467,43 @@ jobs:
             exit 1
           fi
 
+          git fetch --no-tags origin main
+          tag_commit="$(git rev-list --max-count=1 "${GITHUB_REF_NAME}")"
+
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "The release tag must point to a commit contained in main."
+            exit 1
+          fi
+
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.5'
           coverage: none
           tools: composer:v2
-          extensions: fileinfo
+          extensions: fileinfo, zip
 
       - name: Install dependencies
         run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
-      - name: Run release quality gate
-        run: composer check:release
+      - name: Validate release tag and changelog
+        run: php tests/Support/validate-release-tag.php "${GITHUB_REF_NAME}"
 
-      - name: Build release archive and checksum
+      - name: Run source quality gate
+        run: composer check
+
+      - name: Build release archive
         run: |
           mkdir --parents dist
           composer archive --format=zip --dir=dist --file="laravel-config-cache-guard-${GITHUB_REF_NAME}"
+
+      - name: Test the exact release archive
+        env:
+          COMPOSER_PROCESS_TIMEOUT: 0
+        run: php tests/E2E/LaravelConfigCacheGuardE2e.php --package-archive="dist/laravel-config-cache-guard-${GITHUB_REF_NAME}.zip"
+
+      - name: Build release checksum
+        run: |
           cd dist
           sha256sum ./*.zip > SHA256SUMS
 

@@ -181,20 +181,27 @@ foreach ($expectedRuntimePairs as [$phpVersion, $laravelVersion]) {
     $e2eEntry = "- php: '".$phpVersion."'\n"
         ."            laravel: '".$laravelVersion."'";
 
-    foreach (['native package tests', 'Alpine package tests'] as $label) {
+    foreach (['native package tests'] as $label) {
         if (substr_count($jobs[$label], $packageEntry) !== 1) {
             $errors[] = 'The '.$label.' matrix must contain PHP '.$phpVersion.' / Laravel '
                 .$laravelVersion.' with Testbench '.$testbench.' and Pest '.$pest.' exactly once.';
         }
     }
 
-    foreach (['native E2E tests', 'Alpine E2E tests'] as $label) {
+    foreach (['native E2E tests'] as $label) {
         if (substr_count($jobs[$label], $e2eEntry) !== 1) {
             $errors[] = 'The '.$label.' matrix must contain PHP '.$phpVersion.' / Laravel '
                 .$laravelVersion.' exactly once.';
         }
     }
 }
+
+$expectedPairCounts = [
+    'native package tests' => count($expectedRuntimePairs),
+    'native E2E tests' => count($expectedRuntimePairs),
+    'Alpine package tests' => 2,
+    'Alpine E2E tests' => 1,
+];
 
 foreach ($jobs as $label => $job) {
     preg_match_all(
@@ -204,8 +211,8 @@ foreach ($jobs as $label => $job) {
         PREG_SET_ORDER
     );
 
-    if (count($matrixPairMatches) !== count($expectedRuntimePairs)) {
-        $errors[] = 'The '.$label.' matrix must contain exactly '.count($expectedRuntimePairs)
+    if (count($matrixPairMatches) !== $expectedPairCounts[$label]) {
+        $errors[] = 'The '.$label.' matrix must contain exactly '.$expectedPairCounts[$label]
             .' compatible PHP/Laravel runtime entries.';
     }
 
@@ -213,6 +220,43 @@ foreach ($jobs as $label => $job) {
         if (! in_array([$match[1], $match[2]], $expectedRuntimePairs, true)) {
             $errors[] = 'The '.$label.' matrix contains unsupported PHP '
                 .$match[1].' / Laravel '.$match[2].'.';
+        }
+    }
+}
+
+$minimumRuntimePair = $expectedRuntimePairs[0] ?? null;
+$latestRuntimePair = $expectedRuntimePairs[count($expectedRuntimePairs) - 1] ?? null;
+
+foreach ([
+    'Alpine package tests' => array_filter([$minimumRuntimePair, $latestRuntimePair]),
+    'Alpine E2E tests' => array_filter([$latestRuntimePair]),
+] as $label => $requiredPairs) {
+    foreach ($requiredPairs as [$phpVersion, $laravelVersion]) {
+        $pair = "php: '".$phpVersion."'\n"
+            ."            laravel: '".$laravelVersion."'";
+
+        if (substr_count($jobs[$label], $pair) !== 1) {
+            $errors[] = 'The '.$label.' matrix must contain representative PHP '.$phpVersion
+                .' / Laravel '.$laravelVersion.' exactly once.';
+        }
+    }
+}
+
+foreach (['native package tests', 'native E2E tests'] as $label) {
+    foreach (['Linux x64', 'Windows x64'] as $fullMatrixPlatform) {
+        if (str_contains($jobs[$label], 'platform: {name: '.$fullMatrixPlatform)) {
+            $errors[] = 'The '.$label.' matrix must not exclude any '.$fullMatrixPlatform.' runtime pair.';
+        }
+    }
+}
+
+foreach ([
+    'native package tests' => 5,
+    'native E2E tests' => 6,
+] as $label => $expectedPeripheralExclusions) {
+    foreach (['macOS ARM64', 'Linux ARM64'] as $platform) {
+        if (substr_count($jobs[$label], 'platform: {name: '.$platform) !== $expectedPeripheralExclusions) {
+            $errors[] = 'The '.$label.' matrix must keep only the documented representative pairs on '.$platform.'.';
         }
     }
 }
@@ -250,12 +294,14 @@ if (! is_array($alpinePlatform)) {
 }
 
 $minimumDependenciesJob = $jobSection($workflow, 'minimum-dependencies');
+$dependencyReviewJob = $jobSection($workflow, 'dependency-review');
 $coverageJob = $jobSection($workflow, 'coverage');
 $ciGateJob = $jobSection($workflow, 'ci-gate');
 $releaseJob = $jobSection($workflow, 'release');
 
 foreach ([
     'minimum dependency tests' => $minimumDependenciesJob,
+    'dependency review' => $dependencyReviewJob,
     'coverage' => $coverageJob,
     'stable CI gate' => $ciGateJob,
     'signed release' => $releaseJob,
@@ -311,7 +357,7 @@ foreach ([
     }
 }
 
-foreach (['tests', 'end-to-end', 'alpine-tests', 'alpine-end-to-end', 'minimum-dependencies', 'coverage'] as $requiredJob) {
+foreach (['tests', 'end-to-end', 'alpine-tests', 'alpine-end-to-end', 'minimum-dependencies', 'dependency-review', 'coverage'] as $requiredJob) {
     if (! str_contains($ciGateJob, '      - '.$requiredJob)) {
         $errors[] = 'The stable CI gate must depend on '.$requiredJob.'.';
     }
@@ -325,12 +371,34 @@ foreach ([
     "if: startsWith(github.ref, 'refs/tags/v')",
     '      - ci-gate',
     'Require a verified annotated tag',
+    'tests/Support/validate-release-tag.php',
+    '--package-archive=',
+    'git merge-base --is-ancestor',
     'actions/attest-build-provenance@',
     'gh release create',
 ] as $requirement) {
     if (! str_contains($releaseJob, $requirement)) {
         $errors[] = 'The release job must contain: '.$requirement.'.';
     }
+}
+
+foreach ([
+    "cron: '17 3 * * 1'",
+    'actions/dependency-review-action@',
+] as $requirement) {
+    if (! str_contains($workflow, $requirement)) {
+        $errors[] = 'The workflow must contain: '.$requirement.'.';
+    }
+}
+
+$phpunit = (string) file_get_contents($repositoryPath.'/phpunit.xml');
+
+if (! str_contains($phpunit, '<file>bootstrap/guard.php</file>')) {
+    $errors[] = 'Coverage must include the real pre-bootstrap guard.';
+}
+
+if (($composer['scripts']['test:e2e:archive'][1] ?? null) !== '@php tests/Support/release.php') {
+    $errors[] = 'composer test:e2e:archive must build and test the exact release artifact.';
 }
 
 if (! str_contains($jobs['native package tests'], 'timeout-minutes: 20')) {
@@ -372,7 +440,7 @@ fwrite(
     STDOUT,
     '[support-policy] '.$today.': PHP '.implode(', ', $nonEolPhp)
         .' and Laravel '.implode(', ', $nonEolLaravel)
-        .' are non-EOL and fully represented across '.count($policy['platforms']['native'])
-        .' native platforms plus Alpine Linux in both package and E2E CI.'
+        .' are non-EOL, fully represented on Linux x64 and Windows x64, and covered by representative'
+        .' minimum/latest jobs on macOS ARM64, Linux ARM64 and Alpine Linux.'
         .PHP_EOL
 );

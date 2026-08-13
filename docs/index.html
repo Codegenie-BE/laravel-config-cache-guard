@@ -88,7 +88,7 @@
         <div class="section-heading">
           <p class="eyebrow">Verified behavior</p>
           <h2 id="demo-title">A real Laravel 13 repair scenario</h2>
-          <p>The flow below mirrors the package E2E test: Composer installs the package into a fresh application, source files change, PHP runs with <code>exec()</code> disabled and real HTTP requests verify the uncached and repaired states.</p>
+          <p>The flow below mirrors the package E2E test: Composer installs the release artifact into a fresh application, source files change, PHP runs with external process control disabled and real HTTP requests verify the uncached and repaired states.</p>
         </div>
         <figure class="demo-frame">
           <picture>
@@ -140,7 +140,7 @@
             <li>Does not send telemetry or external requests</li>
             <li>Uses file locks and safe diagnostic markers</li>
             <li>Exposes no public repair endpoint</li>
-            <li>Passes no user input to shell commands</li>
+            <li>Invokes fixed process arguments without a shell</li>
           </ul>
           <a href="https://github.com/Codegenie-BE/laravel-config-cache-guard/blob/main/SECURITY.md">Read the security policy</a>
         </div>
@@ -162,7 +162,7 @@
           <p>No. Missing config cache creation is opt-in through <code>CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true</code>. Route guarding starts when route cache already exists.</p>
         </details>
         <details>
-          <summary>What happens when exec() is disabled?</summary>
+          <summary>What happens when external process control is disabled?</summary>
           <p>Stale config is removed, stale routes are bypassed, a safe pending marker is written and Laravel rebuilds internally through <code>Artisan::call()</code> after the response.</p>
         </details>
         <details>

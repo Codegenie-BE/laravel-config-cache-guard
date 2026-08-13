@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 use Codegenie\ConfigCacheGuard\Support\AtomicFile;
+use Codegenie\ConfigCacheGuard\Support\BoundedProcess;
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
+use Codegenie\ConfigCacheGuard\Support\FileLock;
 
 /**
  * Codegenie Laravel Config Cache Guard
@@ -12,7 +14,9 @@ use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
  * deployment cache files before Laravel has a chance to load them.
  */
 $definedVariables = get_defined_vars();
-$composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
+$composerAutoloadPath = $definedVariables['_composer_autoload_path']
+    ?? $GLOBALS['_composer_autoload_path']
+    ?? null;
 
 (static function (?string $composerAutoloadPath): void {
 
@@ -51,8 +55,10 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
             'CONFIG_CACHE_GUARD_ENABLED',
             'CONFIG_CACHE_GUARD_FAIL_HARD',
             'CONFIG_CACHE_GUARD_FAILURE_COOLDOWN',
+            'CONFIG_CACHE_GUARD_LOCK_TIMEOUT',
             'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE',
             'CONFIG_CACHE_GUARD_PHP_BINARY',
+            'CONFIG_CACHE_GUARD_PROCESS_TIMEOUT',
             'CONFIG_CACHE_GUARD_ROUTES',
             'CONFIG_CACHE_GUARD_SIGNATURE_MODE',
             'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE',
@@ -195,6 +201,18 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
 
     if ($failureCooldownSeconds < 1) {
         $failureCooldownSeconds = 60;
+    }
+
+    $lockTimeoutMilliseconds = (int) ($envString('CONFIG_CACHE_GUARD_LOCK_TIMEOUT') ?: 2000);
+
+    if ($lockTimeoutMilliseconds < 0 || $lockTimeoutMilliseconds > 30_000) {
+        $lockTimeoutMilliseconds = 2000;
+    }
+
+    $processTimeoutSeconds = (int) ($envString('CONFIG_CACHE_GUARD_PROCESS_TIMEOUT') ?: 30);
+
+    if ($processTimeoutSeconds < 1 || $processTimeoutSeconds > 300) {
+        $processTimeoutSeconds = 30;
     }
 
     $failHard = $envFlagEnabled('CONFIG_CACHE_GUARD_FAIL_HARD', false);
@@ -450,19 +468,6 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return $mtime !== false && $mtime > (time() - $cooldownSeconds);
     };
 
-    $canUseExec = static function (): bool {
-        if (! function_exists('exec')) {
-            return false;
-        }
-
-        $disabledFunctions = array_filter(array_map(
-            'trim',
-            explode(',', (string) ini_get('disable_functions'))
-        ));
-
-        return ! in_array('exec', $disabledFunctions, true);
-    };
-
     $resolvePhpBinary = static function () use ($envString): ?string {
         $candidates = [
             $envString('CONFIG_CACHE_GUARD_PHP_BINARY'),
@@ -499,20 +504,14 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         return null;
     };
 
-    $runArtisan = static function (string $command, string $phpBinary) use ($basePath): bool {
-        $shellCommand = sprintf(
-            '%s %s %s --no-interaction --no-ansi 2>&1',
-            escapeshellarg($phpBinary),
-            escapeshellarg($basePath.DIRECTORY_SEPARATOR.'artisan'),
-            escapeshellarg($command)
-        );
-
-        $output = [];
-        $exitCode = 1;
-
-        exec($shellCommand, $output, $exitCode);
-
-        return $exitCode === 0;
+    $runArtisan = static function (string $command, string $phpBinary) use ($basePath, $processTimeoutSeconds): bool {
+        return BoundedProcess::run([
+            $phpBinary,
+            $basePath.DIRECTORY_SEPARATOR.'artisan',
+            $command,
+            '--no-interaction',
+            '--no-ansi',
+        ], $basePath, $processTimeoutSeconds);
     };
 
     /**
@@ -566,12 +565,12 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         $invalidateOpcache,
         $cacheExists,
         $isRecentlyFailed,
-        $canUseExec,
         $resolvePhpBinary,
         $runArtisan,
         $arrayFromCallback,
         $signatureFromCallback,
         $failureCooldownSeconds,
+        $lockTimeoutMilliseconds,
         $writeSuccessMarker,
         $showFailure,
         $failHard,
@@ -673,7 +672,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
         }
 
         try {
-            if (! flock($lock, LOCK_EX)) {
+            if (! FileLock::acquire($lock, $lockTimeoutMilliseconds)) {
                 if ($removeCachedFilesWhenPending) {
                     $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
                 }
@@ -716,7 +715,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 return;
             }
 
-            if (! $canUseExec()) {
+            if (! BoundedProcess::isAvailable()) {
                 if ($removeCachedFilesWhenPending) {
                     $removeCachedFilesOrStop($cachedFiles, $failedPath, $name);
                 }
@@ -725,9 +724,9 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                     $pendingPath,
                     $failedPath,
                     $name,
-                    'exec_disabled',
-                    'Automatic '.$name.' cache refresh cannot run before Laravel boots because PHP exec() is unavailable or disabled on this hosting account.',
-                    'Ask your hosting provider to enable exec(), or let the in-app auto repair fallback rebuild after the current HTTP response is sent.',
+                    'process_control_unavailable',
+                    'Automatic '.$name.' cache refresh cannot run before Laravel boots because bounded PHP process control is unavailable on this hosting account.',
+                    'Ask your hosting provider to enable proc_open(), or let the in-app auto repair fallback rebuild after the current HTTP response is sent.',
                     $currentSignature
                 );
 
@@ -854,7 +853,7 @@ $composerAutoloadPath = $definedVariables['_composer_autoload_path'] ?? null;
                 $removeCachedFiles($cachedFiles);
             }
         } finally {
-            flock($lock, LOCK_UN);
+            FileLock::release($lock);
             fclose($lock);
         }
     };

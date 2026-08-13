@@ -23,9 +23,9 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: exec
+    id: process_control
     attributes:
-      label: Is `exec()` available?
+      label: Is bounded process control (`proc_open`) available?
       options:
         - "Yes"
         - "No"

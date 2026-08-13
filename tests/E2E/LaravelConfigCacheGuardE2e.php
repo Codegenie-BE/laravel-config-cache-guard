@@ -12,6 +12,7 @@ use RecursiveIteratorIterator;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
+use ZipArchive;
 
 require dirname(__DIR__, 2).'/vendor/autoload.php';
 
@@ -34,6 +35,7 @@ final class LaravelConfigCacheGuardE2e
         private readonly string $laravelMajor,
         private readonly string $temporaryPath,
         private readonly bool $keepApplication,
+        private readonly bool $artifactPackage = false,
     ) {
         $this->applicationPath = $this->temporaryPath.'/application';
         $this->bootstrapPath = $this->laravelMajor === '13'
@@ -55,7 +57,9 @@ final class LaravelConfigCacheGuardE2e
 
         $this->writeApplicationFixture();
 
-        $this->info('Installing the package through a copied Composer path repository');
+        $this->info($this->artifactPackage
+            ? 'Installing the package from the extracted release artifact'
+            : 'Installing the package through a copied Composer path repository');
         $this->installPackage();
         $this->assertComposerInstallation();
 
@@ -68,7 +72,7 @@ final class LaravelConfigCacheGuardE2e
         $this->info('Testing pre-bootstrap repair through the PHP CLI');
         $this->testExecRepair();
 
-        $this->info('Testing deferred in-app repair with exec() disabled');
+        $this->info('Testing deferred in-app repair with process control disabled');
         $this->testDeferredRepair();
 
         $this->info('Testing an externally configured APP_CONFIG_CACHE path');
@@ -368,9 +372,9 @@ PHP
      * @param  callable(): void  $callback
      * @param  array<string, string|false>  $environment
      */
-    private function withServer(bool $disableExec, callable $callback, array $environment = []): void
+    private function withServer(bool $disableProcessControl, callable $callback, array $environment = []): void
     {
-        $this->startServer($disableExec, $environment);
+        $this->startServer($disableProcessControl, $environment);
 
         try {
             $callback();
@@ -382,7 +386,7 @@ PHP
     /**
      * @param  array<string, string|false>  $environment
      */
-    private function startServer(bool $disableExec, array $environment): void
+    private function startServer(bool $disableProcessControl, array $environment): void
     {
         $this->stopServer();
 
@@ -390,9 +394,9 @@ PHP
         $routerPath = $this->applicationPath.'/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php';
         $command = [PHP_BINARY];
 
-        if ($disableExec) {
+        if ($disableProcessControl) {
             $command[] = '-d';
-            $command[] = 'disable_functions=exec';
+            $command[] = 'disable_functions=exec,proc_open,proc_get_status,proc_terminate,proc_close';
         }
 
         array_push(
@@ -780,7 +784,7 @@ PHP
         self::assert(@mkdir($path, 0777, true) || is_dir($path), 'Could not create directory '.$path.'.');
     }
 
-    private static function removeDirectory(string $path): void
+    public static function removeDirectory(string $path): void
     {
         if (! is_dir($path)) {
             return;
@@ -848,7 +852,7 @@ PHP
 }
 
 /**
- * @return array{laravel: list<string>, keep: bool}
+ * @return array{laravel: list<string>, keep: bool, packageArchive: ?string}
  */
 function e2eOptions(array $arguments): array
 {
@@ -856,12 +860,15 @@ function e2eOptions(array $arguments): array
     $supportedLaravelVersions = array_map('strval', array_keys($policy['laravel']));
     $requestedVersion = getenv('LARAVEL_E2E_VERSION');
     $keep = false;
+    $packageArchive = null;
 
     foreach ($arguments as $argument) {
         if ($argument === '--keep') {
             $keep = true;
         } elseif (str_starts_with($argument, '--laravel=')) {
             $requestedVersion = substr($argument, strlen('--laravel='));
+        } elseif (str_starts_with($argument, '--package-archive=')) {
+            $packageArchive = substr($argument, strlen('--package-archive='));
         }
     }
 
@@ -889,7 +896,69 @@ function e2eOptions(array $arguments): array
         }
     }
 
-    return ['laravel' => $versions, 'keep' => $keep];
+    return ['laravel' => $versions, 'keep' => $keep, 'packageArchive' => $packageArchive];
+}
+
+/**
+ * @return array{path: string, temporaryPath: string}
+ */
+function extractE2ePackageArchive(string $archive): array
+{
+    $archivePath = realpath($archive);
+
+    if (! is_string($archivePath) || ! is_file($archivePath)) {
+        throw new InvalidArgumentException('Package archive does not exist: '.$archive);
+    }
+
+    if (! class_exists(ZipArchive::class)) {
+        throw new RuntimeException('The ZIP extension is required to test a release package archive.');
+    }
+
+    $temporaryPath = rtrim(sys_get_temp_dir(), '/\\')
+        .'/laravel-config-cache-guard-artifact-'.bin2hex(random_bytes(5));
+
+    if (! mkdir($temporaryPath, 0700, true) && ! is_dir($temporaryPath)) {
+        throw new RuntimeException('Could not create the package artifact extraction directory.');
+    }
+
+    $zip = new ZipArchive;
+
+    if ($zip->open($archivePath) !== true) {
+        LaravelConfigCacheGuardE2e::removeDirectory($temporaryPath);
+
+        throw new RuntimeException('Could not open the package archive: '.$archivePath);
+    }
+
+    try {
+        if (! $zip->extractTo($temporaryPath)) {
+            throw new RuntimeException('Could not extract the package archive: '.$archivePath);
+        }
+    } finally {
+        $zip->close();
+    }
+
+    if (is_file($temporaryPath.'/composer.json')) {
+        return ['path' => $temporaryPath, 'temporaryPath' => $temporaryPath];
+    }
+
+    $composerFiles = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($temporaryPath, FilesystemIterator::SKIP_DOTS)
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isFile() && $file->getFilename() === 'composer.json') {
+            $composerFiles[] = $file->getPathname();
+        }
+    }
+
+    if (count($composerFiles) !== 1) {
+        LaravelConfigCacheGuardE2e::removeDirectory($temporaryPath);
+
+        throw new RuntimeException('The package archive must contain exactly one composer.json.');
+    }
+
+    return ['path' => dirname($composerFiles[0]), 'temporaryPath' => $temporaryPath];
 }
 
 $repositoryPath = realpath(dirname(__DIR__, 2));
@@ -899,8 +968,17 @@ if (! is_string($repositoryPath)) {
     exit(1);
 }
 
+$packageExtractionPath = null;
+$exitCode = 0;
+
 try {
     $options = e2eOptions(array_slice($argv, 1));
+
+    if ($options['packageArchive'] !== null) {
+        $extractedPackage = extractE2ePackageArchive($options['packageArchive']);
+        $repositoryPath = $extractedPackage['path'];
+        $packageExtractionPath = $extractedPackage['temporaryPath'];
+    }
 
     foreach ($options['laravel'] as $laravelMajor) {
         $temporaryPath = rtrim(sys_get_temp_dir(), '/\\')
@@ -909,7 +987,8 @@ try {
             $repositoryPath,
             $laravelMajor,
             $temporaryPath,
-            $options['keep']
+            $options['keep'],
+            $options['packageArchive'] !== null
         );
 
         try {
@@ -920,7 +999,15 @@ try {
     }
 } catch (Throwable $exception) {
     fwrite(STDERR, '[e2e] FAILED: '.$exception->getMessage().PHP_EOL);
-    exit(1);
+    $exitCode = 1;
+} finally {
+    if (is_string($packageExtractionPath)) {
+        LaravelConfigCacheGuardE2e::removeDirectory($packageExtractionPath);
+    }
+}
+
+if ($exitCode !== 0) {
+    exit($exitCode);
 }
 
 fwrite(STDOUT, '[e2e] All requested Laravel end-to-end scenarios passed.'.PHP_EOL);

@@ -95,3 +95,30 @@ PHP_INDEX;
 
     expect(readPublicIndex())->toBe($original);
 });
+
+it('reports automatic loading when public index is absent', function (): void {
+    @unlink(public_path('index.php'));
+
+    $this->artisan('config-cache-guard:install')
+        ->expectsOutputToContain('public/index.php was not found')
+        ->assertExitCode(0);
+});
+
+it('reports that no legacy line needs removal', function (): void {
+    writePublicIndex("<?php\n\nrequire __DIR__ . '/../vendor/autoload.php';\n");
+
+    $this->artisan('config-cache-guard:install', ['--remove-legacy' => true])
+        ->expectsOutputToContain('No legacy public/index.php require line was found')
+        ->assertExitCode(0);
+});
+
+it('reports a nonstandard legacy reference that cannot be removed automatically', function (): void {
+    $contents = "<?php\n\n// laravel-config-cache-guard/bootstrap/guard.php\n";
+    writePublicIndex($contents);
+
+    $this->artisan('config-cache-guard:install', ['--remove-legacy' => true])
+        ->expectsOutputToContain('could not be removed automatically')
+        ->assertExitCode(0);
+
+    expect(readPublicIndex())->toBe($contents);
+});

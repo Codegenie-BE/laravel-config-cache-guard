@@ -10,6 +10,7 @@
     </testsuites>
     <source>
         <include>
+            <file>bootstrap/guard.php</file>
             <directory>src</directory>
         </include>
     </source>
