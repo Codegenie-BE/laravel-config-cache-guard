@@ -19,7 +19,7 @@ final class FailureMarker
             '',
         ]);
 
-        @file_put_contents($path, $contents, LOCK_EX);
+        AtomicFile::write($path, $contents);
     }
 
     public static function summary(string $path): ?string

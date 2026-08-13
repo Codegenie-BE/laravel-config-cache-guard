@@ -20,9 +20,19 @@ Run the real application tests before proposing a release-sensitive change:
 
 ```bash
 composer check:release
+composer test:coverage
 ```
 
 The test suite supports only PHP and Laravel versions that are not end of life. The date-aware support-policy check fails when Composer or CI drifts from that policy.
+
+## Releases
+
+Release tags must be annotated and cryptographically signed. The release workflow rejects lightweight or unverified tags, reruns the release quality gate, builds the Composer ZIP, publishes a SHA-256 checksum and records GitHub artifact provenance.
+
+```bash
+git tag --sign vX.Y.Z --message "vX.Y.Z"
+git push origin vX.Y.Z
+```
 
 ## Pull requests
 

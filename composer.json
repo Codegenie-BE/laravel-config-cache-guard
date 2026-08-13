@@ -113,6 +113,7 @@
         "format": "pint",
         "format:test": "pint --test",
         "test": "pest",
+        "test:coverage": "pest --coverage --min=80",
         "test:e2e": [
             "Composer\\Config::disableProcessTimeout",
             "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
@@ -138,6 +139,7 @@
         "format": "Apply Laravel Pint formatting.",
         "format:test": "Check Laravel Pint formatting without changing files.",
         "test": "Run the Pest test suite.",
+        "test:coverage": "Run the Pest suite with Xdebug and enforce the non-decreasing coverage baseline.",
         "test:e2e": "Install the package into fresh Laravel applications and test real cache repair over HTTP."
     }
 }

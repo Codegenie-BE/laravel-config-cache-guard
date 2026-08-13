@@ -20,6 +20,7 @@ jobs:
   tests:
     name: Tests / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 20
 
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
@@ -68,10 +69,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ matrix.runtime.php }}
           coverage: none
@@ -85,7 +86,7 @@ jobs:
         run: composer check:support
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
           key: ${{ matrix.platform.runner }}-composer-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
@@ -158,10 +159,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ matrix.runtime.php }}
           coverage: none
@@ -169,7 +170,7 @@ jobs:
           extensions: fileinfo
 
       - name: Cache Composer downloads
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
           key: e2e-${{ matrix.platform.runner }}-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
@@ -226,10 +227,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Cache Composer downloads
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
           key: alpine-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json', '.github/docker/php-alpine.Dockerfile') }}
@@ -279,10 +280,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Cache Composer downloads
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
           key: alpine-e2e-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json', '.github/docker/php-alpine.Dockerfile') }}
@@ -302,3 +303,181 @@ jobs:
           --env COMPOSER_PROCESS_TIMEOUT=0
           config-cache-guard-alpine-e2e:${{ strategy.job-index }}
           sh -lc 'composer install --prefer-dist --no-interaction --no-progress && composer test:e2e -- --laravel=${{ matrix.runtime.laravel }}'
+
+  minimum-dependencies:
+    name: Minimum dependencies / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - php: '8.2'
+            laravel: '12'
+            testbench: '~10.0'
+            pest: '~3.0'
+          - php: '8.3'
+            laravel: '13'
+            testbench: '~11.0'
+            pest: '~4.0'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: ${{ matrix.runtime.php }}
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Pin Laravel test dependencies
+        run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
+
+      - name: Install minimum supported dependencies
+        run: composer update --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+
+      - name: Validate minimum dependency runtime
+        run: |
+          composer check:support
+          composer check:composer
+          composer check:security
+          composer check:autoload
+          composer test
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: xdebug
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Pin Laravel 13 test dependencies
+        run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+
+      - name: Enforce coverage baseline
+        run: composer test:coverage
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - tests
+      - end-to-end
+      - alpine-tests
+      - alpine-end-to-end
+      - minimum-dependencies
+      - coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify every required job succeeded
+        env:
+          REQUIRED_RESULTS: ${{ toJson(needs) }}
+        run: |
+          if ! jq --exit-status 'all(.[]; .result == "success")' <<< "$REQUIRED_RESULTS"; then
+            jq --raw-output 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$REQUIRED_RESULTS"
+            exit 1
+          fi
+
+  release:
+    name: Build and publish signed release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - ci-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Require a verified annotated tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag_target="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}" --jq '.object')"
+          tag_type="$(jq --raw-output '.type' <<< "$tag_target")"
+          tag_sha="$(jq --raw-output '.sha' <<< "$tag_target")"
+
+          if [ "$tag_type" != "tag" ]; then
+            echo "Release tags must be annotated and cryptographically signed."
+            exit 1
+          fi
+
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.verification.verified')" != "true" ]; then
+            echo "GitHub could not verify the release tag signature."
+            exit 1
+          fi
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+
+      - name: Run release quality gate
+        run: composer check:release
+
+      - name: Build release archive and checksum
+        run: |
+          mkdir --parents dist
+          composer archive --format=zip --dir=dist --file="laravel-config-cache-guard-${GITHUB_REF_NAME}"
+          cd dist
+          sha256sum ./*.zip > SHA256SUMS
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: laravel-config-cache-guard-${{ github.ref_name }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            dist/*.zip
+            dist/SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          dist/*.zip
+          dist/SHA256SUMS
+          --verify-tag
+          --generate-notes
+          --title "${GITHUB_REF_NAME}"

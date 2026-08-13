@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 
 function makeGuardRuntimeProject(): array
@@ -54,6 +55,7 @@ function resetGuardRuntimeEnvironment(): void
         'CONFIG_CACHE_GUARD_ENABLED',
         'CONFIG_CACHE_GUARD_CONFIG',
         'CONFIG_CACHE_GUARD_ROUTES',
+        'CONFIG_CACHE_GUARD_SIGNATURE_MODE',
         'CONFIG_CACHE_GUARD_FAILURE_COOLDOWN',
         'CONFIG_CACHE_GUARD_PHP_BINARY',
         'CONFIG_CACHE_GUARD_FAIL_HARD',
@@ -589,6 +591,45 @@ it('retries an expired failed config repair even after the stale cache was remov
         expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
         expect(is_file($failedPath))->toBeFalse();
         expect(is_file($cachePath.'/config-cache-refresh.succeeded'))->toBeTrue();
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('uses content signatures in the pre-bootstrap guard when explicitly enabled', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/bootstrap/cache';
+        $configPath = $basePath.'/config/app.php';
+        $cachedConfigPath = $cachePath.'/config.php';
+        $signaturePath = $cachePath.'/config-source.signature';
+        $originalContents = (string) file_get_contents($configPath);
+        $changedContents = str_replace('Codegenie', 'Guardrail', $originalContents);
+        $originalMtime = filemtime($configPath);
+
+        expect(strlen($changedContents))->toBe(strlen($originalContents));
+
+        file_put_contents($signaturePath, (string) DeploymentCacheSignatures::config($basePath, 'content'));
+        file_put_contents($cachedConfigPath, '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php exit(1);\n");
+        file_put_contents($configPath, $changedContents);
+
+        if (is_int($originalMtime)) {
+            touch($configPath, $originalMtime);
+        }
+
+        clearstatcache(true, $configPath);
+        putenv('CONFIG_CACHE_GUARD_SIGNATURE_MODE=content');
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+        include $guardPath;
+
+        expect(is_file($cachedConfigPath))->toBeFalse()
+            ->and((string) file_get_contents($cachePath.'/config-cache-refresh.pending'))
+            ->toContain('reason=artisan_command_failed');
     } finally {
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);

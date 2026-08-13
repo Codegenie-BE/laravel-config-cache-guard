@@ -12,7 +12,14 @@ use Throwable;
 
 final class DeploymentCacheSignatures
 {
-    public static function config(string $basePath): ?string
+    public static function mode(?string $mode = null): string
+    {
+        $mode = strtolower($mode ?? Environment::string('CONFIG_CACHE_GUARD_SIGNATURE_MODE') ?? 'metadata');
+
+        return $mode === 'content' ? 'content' : 'metadata';
+    }
+
+    public static function config(string $basePath, ?string $mode = null): ?string
     {
         $configDir = $basePath.'/config';
 
@@ -26,10 +33,10 @@ final class DeploymentCacheSignatures
             self::envFiles($basePath)
         );
 
-        return self::build($basePath, $files);
+        return self::build($basePath, $files, $mode);
     }
 
-    public static function routes(string $basePath): ?string
+    public static function routes(string $basePath, ?string $mode = null): ?string
     {
         $files = array_merge(
             self::collectPhpFiles($basePath.'/config'),
@@ -38,53 +45,12 @@ final class DeploymentCacheSignatures
             self::envFiles($basePath)
         );
 
-        return self::build($basePath, $files);
+        return self::build($basePath, $files, $mode);
     }
 
     public static function write(string $path, ?string $signature): bool
     {
-        if ($signature === null) {
-            return false;
-        }
-
-        $directory = dirname($path);
-
-        if (! is_dir($directory)) {
-            return false;
-        }
-
-        $temporaryPath = @tempnam($directory, '.config-cache-guard-');
-
-        if ($temporaryPath === false) {
-            return false;
-        }
-
-        try {
-            $written = @file_put_contents($temporaryPath, $signature, LOCK_EX);
-
-            if ($written !== strlen($signature)) {
-                return false;
-            }
-
-            if (! @rename($temporaryPath, $path)) {
-                if (is_file($path) && ! @unlink($path)) {
-                    return false;
-                }
-
-                if (! @rename($temporaryPath, $path)) {
-                    return false;
-                }
-            }
-
-            clearstatcache(true, $path);
-            $storedSignature = @file_get_contents($path);
-
-            return is_string($storedSignature) && hash_equals($signature, $storedSignature);
-        } finally {
-            if (is_file($temporaryPath)) {
-                @unlink($temporaryPath);
-            }
-        }
+        return $signature !== null && AtomicFile::write($path, $signature);
     }
 
     private static function bootstrapPath(string $basePath): string
@@ -177,7 +143,7 @@ final class DeploymentCacheSignatures
     /**
      * @param  list<string>  $files
      */
-    private static function build(string $basePath, array $files): ?string
+    private static function build(string $basePath, array $files, ?string $mode): ?string
     {
         $files = array_values(array_unique(array_filter(
             $files,
@@ -191,8 +157,26 @@ final class DeploymentCacheSignatures
         sort($files, SORT_STRING);
 
         $parts = [];
+        $contentMode = self::mode($mode) === 'content';
+        $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 
         foreach ($files as $file) {
+            $relativePath = str_starts_with($file, $basePath.'/')
+                ? str_replace($basePath.'/', '', $file)
+                : $file;
+
+            if ($contentMode) {
+                $contentHash = @hash_file($algorithm, $file);
+
+                if (! is_string($contentHash)) {
+                    return null;
+                }
+
+                $parts[] = $relativePath.'|'.$contentHash;
+
+                continue;
+            }
+
             $stats = @stat($file);
 
             if (! is_array($stats)) {
@@ -200,15 +184,13 @@ final class DeploymentCacheSignatures
             }
 
             $parts[] = implode('|', [
-                str_starts_with($file, $basePath.'/') ? str_replace($basePath.'/', '', $file) : $file,
+                $relativePath,
                 (string) $stats['mtime'],
                 (string) $stats['ctime'],
                 (string) $stats['size'],
                 (string) $stats['ino'],
             ]);
         }
-
-        $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 
         return hash($algorithm, implode("\n", $parts));
     }

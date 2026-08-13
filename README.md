@@ -139,7 +139,7 @@ HTTP request
   -> public/index.php
   -> Laravel requires vendor/autoload.php
   -> Composer autoloads the pre-bootstrap guard
-  -> guard checks config and route source metadata
+  -> guard checks config and route source signatures
   -> unchanged: continue immediately
   -> changed config: remove stale config cache before Laravel can use it
   -> changed routes: point Laravel at a current signature-based route cache path
@@ -263,6 +263,7 @@ At Composer load time, the guard keeps an in-memory snapshot of only these named
 | `CONFIG_CACHE_GUARD_ENABLED` | `true` | Set to `false`, `0`, `off` or `no` to disable the entire guard. |
 | `CONFIG_CACHE_GUARD_CONFIG` | `true` | Set to `false`, `0`, `off` or `no` to disable config cache guarding only. |
 | `CONFIG_CACHE_GUARD_ROUTES` | `true` | Set to `false`, `0`, `off` or `no` to disable route cache guarding only. |
+| `CONFIG_CACHE_GUARD_SIGNATURE_MODE` | `metadata` | Use `metadata` for fast timestamp/size/inode signatures, or `content` to hash source-file contents and detect same-size rewrites that preserve metadata. |
 | `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE` | `false` | Set to `true` to let the guard create Laravel's configured config cache even when no config cache exists yet. |
 | `CONFIG_CACHE_GUARD_AUTO_REPAIR` | `true` | Allows the service provider to process pending repair markers through `Artisan::call()` after the current HTTP response is sent. |
 | `CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE` | `true` | Stores refreshed route caches in a signature-based `routes-*.php` file and sets `APP_ROUTES_CACHE` before Laravel boots. This avoids stale opcache reads of `routes-v7.php` on shared hosting. |
@@ -280,6 +281,7 @@ Example process/server environment configuration:
 CONFIG_CACHE_GUARD_ENABLED=true
 CONFIG_CACHE_GUARD_CONFIG=true
 CONFIG_CACHE_GUARD_ROUTES=true
+CONFIG_CACHE_GUARD_SIGNATURE_MODE=metadata
 CONFIG_CACHE_GUARD_AUTO_REPAIR=true
 CONFIG_CACHE_GUARD_FAILURE_COOLDOWN=60
 CONFIG_CACHE_GUARD_PHP_BINARY=/usr/bin/php
@@ -398,7 +400,7 @@ This package protects you when those steps are forgotten, skipped or not availab
 - Pre-bootstrap rebuilding requires `exec()` and a working PHP CLI binary.
 - In-app auto repair works without `exec()`, but it runs after the current HTTP response is sent. The current request runs without stale deployment cache first.
 - `CONFIG_CACHE_GUARD_FAIL_HARD=true` intentionally stops the request with a safe 503 page, so in-app auto repair cannot run during that same request.
-- Change detection is metadata-based for performance. It uses file timestamps, size and inode metadata instead of reading file contents or `.env` values. Filesystems or deployment tools that preserve all of that metadata for a same-size in-place rewrite can therefore evade detection; a normal deployment cache rebuild remains the primary release mechanism.
+- Change detection uses fast metadata signatures by default. Filesystems or deployment tools that preserve timestamps, size and inode metadata for a same-size in-place rewrite can evade that mode. Set `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content` at process or web-server level to hash source contents, including `.env` files, without storing their values. Content mode performs more file I/O on every guarded request; a normal deployment cache rebuild remains the primary release mechanism.
 - Config cache creation when missing is opt-in through `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
 - Route cache guarding only activates automatically when a `routes-*.php` file already exists in Laravel's active bootstrap cache directory.
 - Pre-bootstrap cache path detection supports Laravel's standard `bootstrap` directory and Laravel 13's `.laravel` directory. Arbitrary bootstrap paths selected later through application code cannot be discovered before `bootstrap/app.php` runs.
@@ -511,7 +513,7 @@ composer install
 composer check
 ```
 
-`composer check` validates that no configured PHP or Laravel branch is EOL, runs strict Composer validation, builds and inspects the package distribution archive, then runs the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The archive check rejects leaked development files, documentation, tests or vendor dependencies and verifies that every runtime file remains present. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:distribution`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse` and `composer test`.
+`composer check` validates that no configured PHP or Laravel branch is EOL, runs strict Composer validation, builds and inspects the package distribution archive, then runs the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The archive check rejects leaked development files, documentation, tests or vendor dependencies and verifies that every runtime file remains present. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:distribution`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse`, `composer test` and `composer test:coverage`. The coverage command requires Xdebug and enforces the non-decreasing 80% baseline.
 
 Run the real application end-to-end suite before a release:
 
@@ -530,7 +532,7 @@ GitHub Actions runs the complete package test matrix and a fresh-application E2E
 - Ubuntu Linux ARM64
 - Alpine Linux x64 in the official PHP Docker image
 
-The seven compatible runtime pairs run as both package and E2E tests on every environment: 70 matrix jobs in total. Linux ARM64 covers modern cloud and container hosts, while Alpine adds musl-based container portability beyond GitHub's native Ubuntu runners. The E2E jobs require Composer network access because they deliberately install clean framework applications.
+The seven compatible runtime pairs run as both package and E2E tests on every environment: 70 compatibility jobs in total. Two additional Linux jobs test the lowest supported Composer dependency set for Laravel 12 and 13, a coverage job enforces the baseline, and one stable `CI gate` combines every required result for branch protection. Linux ARM64 covers modern cloud and container hosts, while Alpine adds musl-based container portability beyond GitHub's native Ubuntu runners. The E2E jobs require Composer network access because they deliberately install clean framework applications.
 
 ## Uninstall
 

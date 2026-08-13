@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheRepairer;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\View;
+use Symfony\Component\Process\Process;
 
 function makeRepairerRuntimeProject(): string
 {
@@ -417,6 +418,77 @@ it('repairs pending route cache into a custom route cache file outside the defau
         expect(is_file($cachePath.'/route-source.signature'))->toBeTrue();
         expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
         expect(is_file($cachePath.'/route-cache-refresh.failed'))->toBeFalse();
+    } finally {
+        removeRepairerRuntimeProject($basePath);
+    }
+});
+
+it('allows only one concurrent process to repair the same pending cache', function (): void {
+    $basePath = makeRepairerRuntimeProject();
+    $cachePath = $basePath.'/bootstrap/cache';
+    $workerPath = $basePath.'/repair-worker.php';
+    $counterPath = $basePath.'/repair-count';
+    $autoloadPath = dirname(__DIR__, 2).'/vendor/autoload.php';
+
+    try {
+        file_put_contents(
+            $cachePath.'/config-cache-refresh.pending',
+            "target=config\nreason=exec_disabled\n"
+        );
+        file_put_contents($workerPath, sprintf(<<<'PHP'
+            <?php
+
+            declare(strict_types=1);
+
+            require %s;
+
+            putenv('CONFIG_CACHE_GUARD_ENABLED=true');
+            putenv('CONFIG_CACHE_GUARD_AUTO_REPAIR=true');
+            putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+            putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+
+            $basePath = __DIR__;
+            $cachePath = $basePath.'/bootstrap/cache';
+
+            \Codegenie\ConfigCacheGuard\Support\DeploymentCacheRepairer::runPending(
+                $basePath,
+                $cachePath,
+                static function (string $command) use ($basePath, $cachePath): int {
+                    if ($command !== 'config:cache') {
+                        return 1;
+                    }
+
+                    file_put_contents($basePath.'/repair-count', "1\n", FILE_APPEND | LOCK_EX);
+                    usleep(600000);
+                    file_put_contents($cachePath.'/config.php', '<?php return [];');
+
+                    return 0;
+                }
+            );
+            PHP, var_export($autoloadPath, true)));
+
+        $first = new Process([PHP_BINARY, $workerPath], $basePath);
+        $second = new Process([PHP_BINARY, $workerPath], $basePath);
+        $first->start();
+
+        $deadline = microtime(true) + 5;
+
+        while (! is_file($counterPath) && microtime(true) < $deadline) {
+            usleep(10000);
+        }
+
+        expect(is_file($counterPath))->toBeTrue();
+
+        $second->start();
+        $first->wait();
+        $second->wait();
+
+        expect($first->isSuccessful())->toBeTrue()
+            ->and($second->isSuccessful())->toBeTrue()
+            ->and(file($counterPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES))->toHaveCount(1)
+            ->and(is_file($cachePath.'/config.php'))->toBeTrue()
+            ->and(is_file($cachePath.'/config-source.signature'))->toBeTrue()
+            ->and(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }

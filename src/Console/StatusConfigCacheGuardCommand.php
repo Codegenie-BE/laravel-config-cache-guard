@@ -75,6 +75,7 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Create config cache when missing', $createConfigWhenMissing ? 'yes' : 'no'],
             ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
+            ['Source signature mode', DeploymentCacheSignatures::mode()],
             ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
             ['Active Laravel cache path', $cachePath],
