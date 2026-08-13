@@ -128,6 +128,7 @@ $nativeJobRequirements = [
     'native package tests' => [
         'name: Tests / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}',
         'runs-on: ${{ matrix.platform.runner }}',
+        "run: composer require --dev 'orchestra/testbench:\${{ matrix.runtime.testbench }}' 'pestphp/pest:\${{ matrix.runtime.pest }}' --no-update --no-interaction",
     ],
     'native E2E tests' => [
         'name: E2E / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}',
@@ -140,6 +141,12 @@ foreach ($nativeJobRequirements as $label => $requirements) {
         if (! str_contains($jobs[$label], $requirement)) {
             $errors[] = 'The '.$label.' job must contain: '.$requirement.'.';
         }
+    }
+}
+
+foreach ($jobs as $label => $job) {
+    if (! str_contains($job, 'COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache')) {
+        $errors[] = 'The '.$label.' job must keep the Composer cache outside the repository checkout.';
     }
 }
 

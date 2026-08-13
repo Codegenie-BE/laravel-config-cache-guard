@@ -22,7 +22,7 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
 
     env:
-      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
 
     strategy:
       fail-fast: false
@@ -95,7 +95,7 @@ jobs:
             ${{ matrix.platform.runner }}-composer-
 
       - name: Pin Laravel test dependencies
-        run: composer require --dev orchestra/testbench:"${{ matrix.runtime.testbench }}" pestphp/pest:"${{ matrix.runtime.pest }}" --no-update --no-interaction
+        run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install dependencies
         run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
 
     strategy:
@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
 
     strategy:
       fail-fast: false
@@ -255,7 +255,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
 
     strategy:
