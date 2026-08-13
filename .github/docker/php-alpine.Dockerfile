@@ -6,6 +6,8 @@ FROM php:${PHP_VERSION}-cli-alpine
 
 RUN apk add --no-cache git unzip
 
+RUN git config --system --add safe.directory /package
+
 COPY --from=composer /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /package

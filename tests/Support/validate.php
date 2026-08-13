@@ -337,7 +337,12 @@ if (! str_contains($jobs['native package tests'], 'timeout-minutes: 20')) {
     $errors[] = 'The native package matrix must have a 20-minute timeout.';
 }
 
-foreach (glob($repositoryPath.'/.github/workflows/*.{yml,yaml}', GLOB_BRACE) ?: [] as $workflowPath) {
+$workflowPaths = array_merge(
+    glob($repositoryPath.'/.github/workflows/*.yml') ?: [],
+    glob($repositoryPath.'/.github/workflows/*.yaml') ?: []
+);
+
+foreach ($workflowPaths as $workflowPath) {
     $workflowContents = (string) file_get_contents($workflowPath);
     preg_match_all('/^\s*uses:\s*([^\s#]+)/m', $workflowContents, $actionMatches);
 

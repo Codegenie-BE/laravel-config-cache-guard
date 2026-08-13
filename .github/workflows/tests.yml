@@ -340,8 +340,13 @@ jobs:
       - name: Install minimum supported dependencies
         run: composer update --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
-      - name: Run quality gates against minimum dependencies
-        run: composer check
+      - name: Validate minimum dependency runtime
+        run: |
+          composer check:support
+          composer check:composer
+          composer check:security
+          composer check:autoload
+          composer test
 
   coverage:
     name: Coverage
