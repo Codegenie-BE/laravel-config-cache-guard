@@ -27,7 +27,7 @@ The test suite supports only PHP and Laravel versions that are not end of life. 
 
 ## Releases
 
-Release tags must be annotated and cryptographically signed. The release workflow rejects lightweight or unverified tags, reruns the release quality gate, builds the Composer ZIP, publishes a SHA-256 checksum and records GitHub artifact provenance.
+Release tags must use strict stable SemVer, have a dated matching changelog section, point to a commit on `main`, and be annotated and cryptographically signed. The release workflow rejects invalid or unverified tags, installs the exact Composer ZIP into fresh Laravel applications, publishes a SHA-256 checksum and records GitHub artifact provenance.
 
 ```bash
 git tag --sign vX.Y.Z --message "vX.Y.Z"

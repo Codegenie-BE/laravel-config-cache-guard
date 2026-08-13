@@ -77,3 +77,34 @@ it('warns when a custom config cache path requires pre-bootstrap environment con
         }
     }
 });
+
+it('returns a failure in strict mode while repair state remains and clears it explicitly', function (): void {
+    $cachePath = base_path('bootstrap/cache');
+    $pendingPath = $cachePath.'/config-cache-refresh.pending';
+    $createdCachePath = false;
+
+    if (! is_dir($cachePath)) {
+        mkdir($cachePath, 0777, true);
+        $createdCachePath = true;
+    }
+
+    try {
+        file_put_contents($pendingPath, "reason=process_control_unavailable\nmessage=Repair is pending.\n");
+
+        $this->artisan('config-cache-guard:status --strict')
+            ->expectsOutputToContain('repair state is still pending or failed')
+            ->assertExitCode(1);
+
+        $this->artisan('config-cache-guard:status --clear-failures')
+            ->expectsOutputToContain('failure and pending markers were cleared')
+            ->assertExitCode(0);
+
+        expect(is_file($pendingPath))->toBeFalse();
+    } finally {
+        @unlink($pendingPath);
+
+        if ($createdCachePath) {
+            @rmdir($cachePath);
+        }
+    }
+});

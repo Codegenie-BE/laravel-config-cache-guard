@@ -4,6 +4,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.4.0 - 2026-08-14
+
 - Added a stable aggregate `CI gate`, immutable commit-SHA Action references, minimum-dependency jobs, an enforced coverage baseline and bounded timeouts for every job.
 - Added repository Secret Scanning, Push Protection and Dependabot security updates.
 - Added optional content-based source signatures for deployment tools that preserve file metadata during same-size rewrites.
@@ -12,9 +14,14 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Added a signed-tag release workflow that validates releases, publishes ZIP and SHA-256 artifacts and records build provenance.
 - Added a Composer distribution gate that builds the release archive, verifies every runtime file and rejects leaked development, documentation or vendor files.
 - Disabled Composer's five-minute process timeout only for the real Laravel E2E script, so `composer check:release` can complete reliably on slower machines without weakening other command timeouts.
-- Expanded both the package suite and real-application E2E coverage to every supported PHP/Laravel pair across Linux x64, Windows x64, macOS ARM64, Linux ARM64 and Alpine Linux x64.
+- Expanded both package and real-application E2E coverage to every supported PHP/Laravel pair on Linux x64 and Windows x64, with representative portability jobs on macOS ARM64, Linux ARM64 and Alpine Linux x64.
 - Added an official-PHP Alpine Docker test environment for musl-based container portability.
 - Strengthened support-policy validation so missing platforms, runners, runtime pairs, Alpine infrastructure or incorrect Testbench and Pest pins fail CI.
+- Added bounded pre-bootstrap process execution and lock acquisition so a stuck Artisan command or concurrent rebuild cannot block a request indefinitely.
+- Added `config-cache-guard:status --strict`, verified marker cleanup and timeout diagnostics for deployment health checks.
+- Expanded coverage to the real pre-bootstrap guard and added focused process, lock and failure-state regressions.
+- Changed release validation to install and test the exact Composer ZIP artifact in fresh Laravel 12 and 13 applications.
+- Added strict SemVer and changelog validation for release tags, scheduled weekly compatibility runs and pull-request dependency review.
 
 ## v1.3.1 - 2026-08-11
 

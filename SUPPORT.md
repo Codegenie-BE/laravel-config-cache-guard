@@ -8,7 +8,7 @@ Include:
 
 - package, PHP and Laravel versions
 - operating system or hosting panel
-- whether SSH, PHP CLI and `exec()` are available
+- whether SSH, PHP CLI and bounded process control (`proc_open`) are available
 - redacted output from `php artisan config-cache-guard:status`
 - the smallest reproducible sequence of deployment steps
 

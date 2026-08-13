@@ -21,7 +21,7 @@ When Terminal or a deployment hook is available:
 1. Point the domain document root at the Laravel `public` directory.
 2. Run the recommended deployment commands from the application root.
 3. Confirm that Laravel's active bootstrap cache directory is writable by the PHP web process.
-4. Run `php artisan config-cache-guard:status` and resolve warnings before sending traffic.
+4. Run `php artisan config-cache-guard:status --strict` and resolve failures before sending traffic.
 
 When Terminal is unavailable, build the Composer vendor directory in a clean environment with a compatible PHP version, upload the release without overlaying an older vendor tree, and keep the bootstrap cache directory writable. The first web request can reject stale cache and complete in-app repair.
 
@@ -35,7 +35,7 @@ If Plesk runs a different PHP CLI version than the website, set the full support
 CONFIG_CACHE_GUARD_PHP_BINARY=/opt/plesk/php/8.4/bin/php
 ```
 
-Run `config-cache-guard:status` with that same binary to verify the result.
+Run `config-cache-guard:status --strict` with that same binary to verify the result.
 
 ## FTP-only deployment
 
@@ -66,7 +66,7 @@ Build and test an artifact before upload. A minimal cache stage looks like:
 
 Provide production environment variables through the deployment platform, not the build log. If production secrets are unavailable during artifact creation, run cache commands on the server after the new release is in place instead.
 
-## Hosting without `exec()` or SSH
+## Hosting without process control or SSH
 
 The defaults already support in-app repair:
 

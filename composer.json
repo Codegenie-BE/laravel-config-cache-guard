@@ -100,7 +100,7 @@
         ],
         "check:release": [
             "@check",
-            "@test:e2e"
+            "@test:e2e:archive"
         ],
         "check:autoload": "@composer dump-autoload --optimize --strict-psr --no-interaction",
         "check:composer": "@composer validate --strict",
@@ -117,6 +117,10 @@
         "test:e2e": [
             "Composer\\Config::disableProcessTimeout",
             "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
+        ],
+        "test:e2e:archive": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php tests/Support/release.php"
         ]
     },
     "minimum-stability": "stable",
@@ -140,6 +144,7 @@
         "format:test": "Check Laravel Pint formatting without changing files.",
         "test": "Run the Pest test suite.",
         "test:coverage": "Run the Pest suite with Xdebug and enforce the non-decreasing coverage baseline.",
-        "test:e2e": "Install the package into fresh Laravel applications and test real cache repair over HTTP."
+        "test:e2e": "Install the source checkout into fresh Laravel applications and test real cache repair over HTTP.",
+        "test:e2e:archive": "Build the release ZIP, install that exact artifact into fresh Laravel applications and run the end-to-end suite."
     }
 }

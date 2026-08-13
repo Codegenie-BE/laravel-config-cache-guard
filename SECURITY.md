@@ -22,7 +22,7 @@ The package may:
 - optionally hash those source-file contents in memory when `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content`; only the aggregate one-way signature is persisted
 - remove stale config cache from Laravel's active cache path, including an externally configured `APP_CONFIG_CACHE` path
 - remove or bypass stale route cache in Laravel's active bootstrap cache directory
-- run fixed deployment-cache commands through PHP CLI when `exec()` is available
+- run fixed deployment-cache argument arrays through a bounded PHP CLI process when `proc_open()` is available
 - queue an internal pending marker when pre-bootstrap rebuilding is unavailable
 - rebuild through Laravel's own `Artisan::call()` after Laravel boots uncached
 - write safe diagnostic markers in Laravel's active bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`)
@@ -40,25 +40,25 @@ The package does not:
 - expose a public repair endpoint
 - require a secret repair URL or token
 - require manual code changes in `public/index.php` for new installations
-- execute user-controlled shell commands
+- execute shell commands or user-controlled process arguments
 - run the guard during normal CLI/phpdbg execution unless explicitly allowed for testing
 - call `cache:clear`, `optimize:clear`, `view:clear`, `event:clear`, migrations or Composer commands
 - use Redis, queues, workers, cron or a database
 
-## Shell command safety
+## Process execution safety
 
 The guard is loaded by Composer `autoload.files` during HTTP requests and is idempotent when older manual require lines still exist.
 
-When pre-bootstrap rebuilding is possible, the only shell commands executed are fixed Laravel Artisan commands:
+When pre-bootstrap rebuilding is possible, the only child-process argument arrays are fixed Laravel Artisan commands:
 
 ```bash
 php artisan config:cache
 php artisan route:cache
 ```
 
-The PHP binary path and application path are escaped before shell execution. No user input is passed into the command.
+The PHP binary and Artisan paths are passed directly to `proc_open()` without invoking a shell. No user input is passed into the command. The process is terminated after `CONFIG_CACHE_GUARD_PROCESS_TIMEOUT` seconds, and filesystem-lock acquisition is bounded by `CONFIG_CACHE_GUARD_LOCK_TIMEOUT`.
 
-When `exec()` is unavailable, the package falls back to internal in-app repair through `Artisan::call()` after Laravel has booted without the stale cache file. If a known-stale cache file cannot be removed or bypassed, the guard stops the request with a safe 503 response instead of allowing Laravel to load it.
+When bounded process control is unavailable, the package falls back to internal in-app repair through `Artisan::call()` after Laravel has booted without the stale cache file. If a known-stale cache file cannot be removed or bypassed, the guard stops the request with a safe 503 response instead of allowing Laravel to load it.
 
 ## Diagnostic markers
 

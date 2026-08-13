@@ -241,13 +241,13 @@ final class DeploymentCacheRepairer
         }
 
         try {
-            if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            if (! FileLock::acquire($lock)) {
                 return;
             }
 
             $callback();
         } finally {
-            flock($lock, LOCK_UN);
+            FileLock::release($lock);
             fclose($lock);
         }
     }

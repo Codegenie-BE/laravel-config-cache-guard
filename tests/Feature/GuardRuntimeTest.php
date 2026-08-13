@@ -8,22 +8,22 @@ use Codegenie\ConfigCacheGuard\Support\Environment;
 function makeGuardRuntimeProject(): array
 {
     $basePath = sys_get_temp_dir().'/config-cache-guard-'.bin2hex(random_bytes(8));
-    $packagePath = $basePath.'/vendor/codegenie-be/laravel-config-cache-guard';
 
-    mkdir($packagePath.'/bootstrap', 0777, true);
+    mkdir($basePath.'/vendor', 0777, true);
     mkdir($basePath.'/bootstrap/cache', 0777, true);
     mkdir($basePath.'/config', 0777, true);
     mkdir($basePath.'/routes', 0777, true);
 
-    copy(dirname(__DIR__, 2).'/bootstrap/guard.php', $packagePath.'/bootstrap/guard.php');
-
+    file_put_contents($basePath.'/vendor/autoload.php', "<?php\n");
     file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php\n");
     file_put_contents($basePath.'/.env', "APP_NAME=Codegenie\n");
     putenv('CONFIG_CACHE_GUARD_ALLOW_CLI=true');
     file_put_contents($basePath.'/config/app.php', "<?php\n\nreturn ['name' => 'Codegenie'];\n");
     file_put_contents($basePath.'/routes/web.php', "<?php\n\nuse Illuminate\\Support\\Facades\\Route;\n\nRoute::get('/', fn () => 'ok');\n");
 
-    return [$basePath, $packagePath.'/bootstrap/guard.php'];
+    $GLOBALS['_composer_autoload_path'] = $basePath.'/vendor/autoload.php';
+
+    return [$basePath, dirname(__DIR__, 2).'/bootstrap/guard.php'];
 }
 
 function removeGuardRuntimeProject(string $path): void
@@ -57,7 +57,9 @@ function resetGuardRuntimeEnvironment(): void
         'CONFIG_CACHE_GUARD_ROUTES',
         'CONFIG_CACHE_GUARD_SIGNATURE_MODE',
         'CONFIG_CACHE_GUARD_FAILURE_COOLDOWN',
+        'CONFIG_CACHE_GUARD_LOCK_TIMEOUT',
         'CONFIG_CACHE_GUARD_PHP_BINARY',
+        'CONFIG_CACHE_GUARD_PROCESS_TIMEOUT',
         'CONFIG_CACHE_GUARD_FAIL_HARD',
         'CONFIG_CACHE_GUARD_AUTO_REPAIR',
         'CONFIG_CACHE_GUARD_ALLOW_CLI',
@@ -75,7 +77,8 @@ function resetGuardRuntimeEnvironment(): void
     unset(
         $GLOBALS['__codegenie_config_cache_guard_loaded'],
         $GLOBALS['__codegenie_config_cache_guard_external_environment'],
-        $GLOBALS['__codegenie_config_cache_guard_external_app_env']
+        $GLOBALS['__codegenie_config_cache_guard_external_app_env'],
+        $GLOBALS['_composer_autoload_path']
     );
 }
 
@@ -631,6 +634,60 @@ it('uses content signatures in the pre-bootstrap guard when explicitly enabled',
             ->and((string) file_get_contents($cachePath.'/config-cache-refresh.pending'))
             ->toContain('reason=artisan_command_failed');
     } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('queues deferred repair when the pre-bootstrap process times out', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+
+    try {
+        $cachePath = $basePath.'/bootstrap/cache';
+
+        file_put_contents($cachePath.'/config.php', '<?php return [];');
+        file_put_contents($basePath.'/artisan', "#!/usr/bin/env php\n<?php sleep(5); exit(0);\n");
+
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+        putenv('CONFIG_CACHE_GUARD_PROCESS_TIMEOUT=1');
+
+        $startedAt = microtime(true);
+        include $guardPath;
+
+        expect(microtime(true) - $startedAt)->toBeLessThan(3.0)
+            ->and(is_file($cachePath.'/config.php'))->toBeFalse()
+            ->and((string) file_get_contents($cachePath.'/config-cache-refresh.pending'))
+            ->toContain('reason=artisan_command_failed');
+    } finally {
+        resetGuardRuntimeEnvironment();
+        removeGuardRuntimeProject($basePath);
+    }
+});
+
+it('bounds lock waiting before queueing deferred repair', function (): void {
+    [$basePath, $guardPath] = makeGuardRuntimeProject();
+    $lock = fopen($basePath.'/bootstrap/cache/config-cache-refresh.lock', 'c');
+
+    expect($lock)->toBeResource();
+
+    try {
+        file_put_contents($basePath.'/bootstrap/cache/config.php', '<?php return [];');
+        flock($lock, LOCK_EX);
+
+        putenv('CONFIG_CACHE_GUARD_CONFIG=true');
+        putenv('CONFIG_CACHE_GUARD_ROUTES=false');
+        putenv('CONFIG_CACHE_GUARD_LOCK_TIMEOUT=75');
+
+        $startedAt = microtime(true);
+        include $guardPath;
+
+        expect(microtime(true) - $startedAt)->toBeLessThan(0.5)
+            ->and((string) file_get_contents($basePath.'/bootstrap/cache/config-cache-refresh.pending'))
+            ->toContain('reason=lock_unavailable');
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
         resetGuardRuntimeEnvironment();
         removeGuardRuntimeProject($basePath);
     }
