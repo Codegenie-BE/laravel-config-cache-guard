@@ -33,14 +33,14 @@ return [
         '12' => [
             'php' => ['8.2', '8.3', '8.4', '8.5'],
             'security_fixes_until' => '2027-02-24',
-            'testbench' => '^10.0',
-            'pest' => '^3.0',
+            'testbench' => '~10.0',
+            'pest' => '~3.0',
         ],
         '13' => [
             'php' => ['8.3', '8.4', '8.5'],
             'security_fixes_until' => '2028-03-17',
-            'testbench' => '^11.0',
-            'pest' => '^4.0',
+            'testbench' => '~11.0',
+            'pest' => '~4.0',
         ],
     ],
 ];
