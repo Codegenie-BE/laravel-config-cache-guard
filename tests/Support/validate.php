@@ -397,14 +397,18 @@ foreach ([
     '          - patch',
     '          - minor',
     '          - major',
+    'actions: write',
     'contents: write',
+    'pull-requests: write',
     'tests/Support/next-release-tag.php',
     'tests/Support/prepare-release.php',
     'tests/Support/validate-release-tag.php',
-    'compare/main...${branch}?expand=1',
+    'gh pr create',
+    'gh workflow run tests.yml --ref "${branch}"',
+    'gh pr merge "${pr_url}" --auto --squash --delete-branch',
 ] as $requirement) {
     if (! str_contains($prepareReleaseWorkflow, $requirement)) {
-        $errors[] = 'The release-branch workflow must contain: '.$requirement.'.';
+        $errors[] = 'The release-PR workflow must contain: '.$requirement.'.';
     }
 }
 

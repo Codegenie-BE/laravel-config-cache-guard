@@ -27,9 +27,9 @@ The test suite supports only PHP and Laravel versions that are not end of life. 
 
 ## Releases
 
-User-facing changes belong under `Unreleased` in `CHANGELOG.md`. When those changes are ready, run the **Prepare release branch** workflow from the Actions tab and choose a patch, minor or major increment. The workflow calculates the next strict SemVer version, moves the unreleased notes into a dated section, pushes a release branch and provides the direct link for opening its pull request. GitHub organization policy requires that final PR-opening click to remain a maintainer action.
+User-facing changes belong under `Unreleased` in `CHANGELOG.md`. When those changes are ready, run the **Prepare release PR** workflow from the Actions tab and choose a patch, minor or major increment. The workflow calculates the next strict SemVer version, moves the unreleased notes into a dated section, pushes a release branch, opens its pull request and explicitly starts the complete test workflow. It enables auto-merge, but the protected branch keeps the merge blocked until the required `CI gate` passes.
 
-Merging that release PR does not bypass validation. The normal protected `main` workflow first runs the complete CI gate. Only after it succeeds does the release job build and test the exact Composer ZIP, create an annotated tag, publish the ZIP and SHA-256 checksum, record GitHub artifact provenance and wait until Packagist exposes the same version at the same commit. Do not create release tags manually.
+After the release PR auto-merges, the protected `main` workflow runs the complete CI gate again. Only after it succeeds does the release job build and test the exact Composer ZIP, create an annotated tag, publish the ZIP and SHA-256 checksum, record GitHub artifact provenance and wait until Packagist exposes the same version at the same commit. Do not create release tags manually.
 
 ## Pull requests
 

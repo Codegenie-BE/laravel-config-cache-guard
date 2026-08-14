@@ -4,6 +4,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+- Automated release pull-request creation, explicit CI dispatch and protected auto-merge before GitHub and Packagist publication.
+
 ## v1.4.0 - 2026-08-14
 
 - Added a stable aggregate `CI gate`, immutable commit-SHA Action references, minimum-dependency jobs, an enforced coverage baseline and bounded timeouts for every job.
