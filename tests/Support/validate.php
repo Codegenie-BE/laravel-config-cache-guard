@@ -379,8 +379,8 @@ foreach ([
     'actions/attest-build-provenance@',
     'gh release create',
     'Verify Packagist publication',
-    'packagist.org/packages/codegenie-be/laravel-config-cache-guard.json',
-    '.package.versions[$tag].source.reference == $commit',
+    'repo.packagist.org/p2/codegenie-be/laravel-config-cache-guard.json',
+    'any(.version == $tag and .source.reference == $commit)',
 ] as $requirement) {
     if (! str_contains($releaseJob, $requirement)) {
         $errors[] = 'The release job must contain: '.$requirement.'.';

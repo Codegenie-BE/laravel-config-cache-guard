@@ -591,11 +591,11 @@ jobs:
         run: |
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error \
-              "https://packagist.org/packages/codegenie-be/laravel-config-cache-guard.json" \
+              "https://repo.packagist.org/p2/codegenie-be/laravel-config-cache-guard.json" \
               | jq --exit-status \
                 --arg tag "${RELEASE_TAG}" \
                 --arg commit "${RELEASE_COMMIT}" \
-                '.package.versions[$tag].source.reference == $commit' >/dev/null; then
+                '.packages["codegenie-be/laravel-config-cache-guard"] | any(.version == $tag and .source.reference == $commit)' >/dev/null; then
               echo "Packagist exposes ${RELEASE_TAG} at ${RELEASE_COMMIT}."
               exit 0
             fi
