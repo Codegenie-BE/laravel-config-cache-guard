@@ -27,12 +27,9 @@ The test suite supports only PHP and Laravel versions that are not end of life. 
 
 ## Releases
 
-Release tags must use strict stable SemVer, have a dated matching changelog section, point to a commit on `main`, and be annotated and cryptographically signed. The release workflow rejects invalid or unverified tags, installs the exact Composer ZIP into fresh Laravel applications, publishes a SHA-256 checksum and records GitHub artifact provenance.
+User-facing changes belong under `Unreleased` in `CHANGELOG.md`. When those changes are ready, run the **Prepare release branch** workflow from the Actions tab and choose a patch, minor or major increment. The workflow calculates the next strict SemVer version, moves the unreleased notes into a dated section, pushes a release branch and provides the direct link for opening its pull request. GitHub organization policy requires that final PR-opening click to remain a maintainer action.
 
-```bash
-git tag --sign vX.Y.Z --message "vX.Y.Z"
-git push origin vX.Y.Z
-```
+Merging that release PR does not bypass validation. The normal protected `main` workflow first runs the complete CI gate. Only after it succeeds does the release job build and test the exact Composer ZIP, create an annotated tag, publish the ZIP and SHA-256 checksum, record GitHub artifact provenance and wait until Packagist exposes the same version at the same commit. Do not create release tags manually.
 
 ## Pull requests
 

@@ -61,6 +61,7 @@ foreach (['illuminate/console', 'illuminate/support'] as $package) {
 }
 
 $workflow = (string) file_get_contents($repositoryPath.'/.github/workflows/tests.yml');
+$prepareReleaseWorkflow = (string) file_get_contents($repositoryPath.'/.github/workflows/prepare-release.yml');
 preg_match_all('/^\s+php:\s*[\'\"](\d+\.\d+)[\'\"]\s*$/m', $workflow, $workflowPhpMatches);
 preg_match_all('/^\s+laravel:\s*[\'\"](\d+)[\'\"]\s*$/m', $workflow, $workflowLaravelMatches);
 $workflowPhp = array_values(array_unique($workflowPhpMatches[1]));
@@ -304,7 +305,7 @@ foreach ([
     'dependency review' => $dependencyReviewJob,
     'coverage' => $coverageJob,
     'stable CI gate' => $ciGateJob,
-    'signed release' => $releaseJob,
+    'automated release' => $releaseJob,
 ] as $label => $job) {
     if ($job === '') {
         $errors[] = 'The GitHub Actions workflow is missing the '.$label.' job.';
@@ -368,17 +369,42 @@ if (! str_contains($ciGateJob, 'name: CI gate')) {
 }
 
 foreach ([
-    "if: startsWith(github.ref, 'refs/tags/v')",
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'",
     '      - ci-gate',
-    'Require a verified annotated tag',
+    'Detect pending changelog release',
+    'tests/Support/detect-release.php',
     'tests/Support/validate-release-tag.php',
     '--package-archive=',
-    'git merge-base --is-ancestor',
+    'git tag --annotate',
     'actions/attest-build-provenance@',
     'gh release create',
+    'Verify Packagist publication',
+    'packagist.org/packages/codegenie-be/laravel-config-cache-guard.json',
+    '.package.versions[$tag].source.reference == $commit',
 ] as $requirement) {
     if (! str_contains($releaseJob, $requirement)) {
         $errors[] = 'The release job must contain: '.$requirement.'.';
+    }
+}
+
+if (str_contains($workflow, "tags:\n      - 'v*'")) {
+    $errors[] = 'Release publication must be driven by protected main after CI, not by an externally pushed tag.';
+}
+
+foreach ([
+    'workflow_dispatch:',
+    'type: choice',
+    '          - patch',
+    '          - minor',
+    '          - major',
+    'contents: write',
+    'tests/Support/next-release-tag.php',
+    'tests/Support/prepare-release.php',
+    'tests/Support/validate-release-tag.php',
+    'compare/main...${branch}?expand=1',
+] as $requirement) {
+    if (! str_contains($prepareReleaseWorkflow, $requirement)) {
+        $errors[] = 'The release-branch workflow must contain: '.$requirement.'.';
     }
 }
 

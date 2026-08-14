@@ -11,7 +11,7 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Added optional content-based source signatures for deployment tools that preserve file metadata during same-size rewrites.
 - Shared atomic writes and signature calculation between pre-bootstrap and deferred repair paths, and reused the initial route signature within a request.
 - Added a real two-process repair-lock regression test that runs across the complete platform matrix.
-- Added a signed-tag release workflow that validates releases, publishes ZIP and SHA-256 artifacts and records build provenance.
+- Added a hardened release workflow that validates releases, publishes ZIP and SHA-256 artifacts and records build provenance.
 - Added a Composer distribution gate that builds the release archive, verifies every runtime file and rejects leaked development, documentation or vendor files.
 - Disabled Composer's five-minute process timeout only for the real Laravel E2E script, so `composer check:release` can complete reliably on slower machines without weakening other command timeouts.
 - Expanded both package and real-application E2E coverage to every supported PHP/Laravel pair on Linux x64 and Windows x64, with representative portability jobs on macOS ARM64, Linux ARM64 and Alpine Linux x64.
@@ -22,6 +22,9 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Expanded coverage to the real pre-bootstrap guard and added focused process, lock and failure-state regressions.
 - Changed release validation to install and test the exact Composer ZIP artifact in fresh Laravel 12 and 13 applications.
 - Added strict SemVer and changelog validation for release tags, scheduled weekly compatibility runs and pull-request dependency review.
+- Added a release-branch workflow that calculates patch, minor or major versions, prepares the dated changelog automatically and provides the direct PR link.
+- Changed stable publication to run only after protected `main` CI succeeds, then create the annotated tag, GitHub Release, checksum and provenance automatically.
+- Added post-release Packagist verification that requires the published version to resolve to the exact released commit.
 
 ## v1.3.1 - 2026-08-11
 

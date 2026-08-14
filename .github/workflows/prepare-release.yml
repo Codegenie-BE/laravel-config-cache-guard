@@ -1,0 +1,81 @@
+name: Prepare release branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semantic version increment
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare release branch
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: none
+
+      - name: Determine next version
+        id: release
+        env:
+          RELEASE_BUMP: ${{ inputs.bump }}
+        run: |
+          tag="$(php tests/Support/next-release-tag.php "${RELEASE_BUMP}")"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "${tag} already exists."
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare and validate changelog
+        run: |
+          php tests/Support/prepare-release.php "${{ steps.release.outputs.tag }}"
+          php tests/Support/validate-release-tag.php "${{ steps.release.outputs.tag }}"
+
+      - name: Create release branch
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          branch="release/${RELEASE_TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "${branch}"
+          git add CHANGELOG.md
+          git commit --message "chore: prepare ${RELEASE_TAG}"
+          git push --set-upstream origin "${branch}"
+
+          compare_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1"
+          {
+            echo "## ${RELEASE_TAG} is ready for review"
+            echo
+            echo "[Open the prepared release pull request](${compare_url})."
+            echo
+            echo "After it is merged and the protected main CI gate passes, ${RELEASE_TAG} is published to GitHub and Packagist automatically."
+          } >> "$GITHUB_STEP_SUMMARY"
