@@ -4,6 +4,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.4.3 - 2026-08-14
+
 - Delete the exact generated release branch after protected auto-merge instead of leaving completed release branches on the remote.
 
 ## v1.4.2 - 2026-08-14
