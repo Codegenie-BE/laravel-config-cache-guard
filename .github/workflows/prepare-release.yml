@@ -1,4 +1,4 @@
-name: Prepare release branch
+name: Prepare release PR
 
 on:
   workflow_dispatch:
@@ -18,11 +18,13 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
+  pull-requests: write
 
 jobs:
   prepare:
-    name: Prepare release branch
+    name: Prepare release PR
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -59,8 +61,9 @@ jobs:
           php tests/Support/prepare-release.php "${{ steps.release.outputs.tag }}"
           php tests/Support/validate-release-tag.php "${{ steps.release.outputs.tag }}"
 
-      - name: Create release branch
+      - name: Create release pull request
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           branch="release/${RELEASE_TAG}"
@@ -71,11 +74,22 @@ jobs:
           git commit --message "chore: prepare ${RELEASE_TAG}"
           git push --set-upstream origin "${branch}"
 
-          compare_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1"
+          pr_url="$(gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "chore: prepare ${RELEASE_TAG}" \
+            --body "Prepare ${RELEASE_TAG} from the validated Unreleased changelog. Once the required CI gate succeeds, this pull request is merged automatically and the protected main workflow publishes the GitHub release and Packagist version.")"
+
+          # Pull requests opened with GITHUB_TOKEN require explicit workflow dispatch.
+          # Running tests.yml for the release branch creates the required CI gate on
+          # the exact pull-request head commit without relying on recursive events.
+          gh workflow run tests.yml --ref "${branch}"
+          gh pr merge "${pr_url}" --auto --squash --delete-branch
+
           {
-            echo "## ${RELEASE_TAG} is ready for review"
+            echo "## ${RELEASE_TAG} release pull request created"
             echo
-            echo "[Open the prepared release pull request](${compare_url})."
+            echo "[Open the release pull request](${pr_url})."
             echo
-            echo "After it is merged and the protected main CI gate passes, ${RELEASE_TAG} is published to GitHub and Packagist automatically."
+            echo "The complete test workflow was dispatched explicitly. Auto-merge is enabled and remains blocked until the required CI gate passes. After merge, protected main publishes ${RELEASE_TAG} to GitHub and Packagist automatically."
           } >> "$GITHUB_STEP_SUMMARY"
