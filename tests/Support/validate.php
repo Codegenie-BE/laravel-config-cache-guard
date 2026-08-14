@@ -404,12 +404,20 @@ foreach ([
     'tests/Support/prepare-release.php',
     'tests/Support/validate-release-tag.php',
     'gh pr create',
-    'gh workflow run tests.yml --ref "${branch}"',
+    '--event pull_request',
+    '.headSha == \"${release_sha}\" and .conclusion == \"action_required\"',
+    'actions/runs/${approval_run_id}/approve',
     'gh pr merge "${pr_url}" --auto --squash --delete-branch',
+    'if [ "${pr_state}" = "MERGED" ]',
+    'gh workflow run tests.yml --ref main',
 ] as $requirement) {
     if (! str_contains($prepareReleaseWorkflow, $requirement)) {
         $errors[] = 'The release-PR workflow must contain: '.$requirement.'.';
     }
+}
+
+if (str_contains($prepareReleaseWorkflow, 'gh workflow run tests.yml --ref "${branch}"')) {
+    $errors[] = 'The release-PR workflow must not dispatch duplicate branch CI before approving its pull-request run.';
 }
 
 foreach ([

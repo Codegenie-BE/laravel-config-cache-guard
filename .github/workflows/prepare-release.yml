@@ -27,7 +27,7 @@ jobs:
     name: Prepare release PR
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Checkout main
@@ -72,6 +72,7 @@ jobs:
           git switch --create "${branch}"
           git add CHANGELOG.md
           git commit --message "chore: prepare ${RELEASE_TAG}"
+          release_sha="$(git rev-parse HEAD)"
           git push --set-upstream origin "${branch}"
 
           pr_url="$(gh pr create \
@@ -80,16 +81,66 @@ jobs:
             --title "chore: prepare ${RELEASE_TAG}" \
             --body "Prepare ${RELEASE_TAG} from the validated Unreleased changelog. Once the required CI gate succeeds, this pull request is merged automatically and the protected main workflow publishes the GitHub release and Packagist version.")"
 
-          # Pull requests opened with GITHUB_TOKEN require explicit workflow dispatch.
-          # Running tests.yml for the release branch creates the required CI gate on
-          # the exact pull-request head commit without relying on recursive events.
-          gh workflow run tests.yml --ref "${branch}"
+          # GitHub creates pull-request workflows opened by GITHUB_TOKEN in an
+          # approval-required state. Approve only the Tests run for the exact
+          # release commit so its CI gate is associated with this pull request.
+          approval_run_id=""
+          for attempt in {1..12}; do
+            approval_run_id="$(gh run list \
+              --workflow tests.yml \
+              --branch "${branch}" \
+              --event pull_request \
+              --limit 20 \
+              --json databaseId,conclusion,headSha \
+              --jq ".[] | select(.headSha == \"${release_sha}\" and .conclusion == \"action_required\") | .databaseId" \
+              | head -n 1)"
+
+            if [ -n "${approval_run_id}" ]; then
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [ -z "${approval_run_id}" ]; then
+            echo "No approval-required Tests run appeared for ${release_sha}."
+            exit 1
+          fi
+
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${approval_run_id}/approve"
           gh pr merge "${pr_url}" --auto --squash --delete-branch
 
+          # A merge performed by GITHUB_TOKEN does not emit a recursive push run.
+          # Keep this job alive until auto-merge completes, then dispatch protected
+          # main explicitly so the release job can publish the prepared version.
+          merged=false
+          for attempt in {1..180}; do
+            pr_state="$(gh pr view "${pr_url}" --json state --jq '.state')"
+
+            if [ "${pr_state}" = "MERGED" ]; then
+              merged=true
+              break
+            fi
+
+            if [ "${pr_state}" = "CLOSED" ]; then
+              echo "The release pull request closed without merging."
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          if [ "${merged}" != "true" ]; then
+            echo "Timed out waiting for the release pull request to auto-merge."
+            exit 1
+          fi
+
+          gh workflow run tests.yml --ref main
+
           {
-            echo "## ${RELEASE_TAG} release pull request created"
+            echo "## ${RELEASE_TAG} release pull request merged"
             echo
             echo "[Open the release pull request](${pr_url})."
             echo
-            echo "The complete test workflow was dispatched explicitly. Auto-merge is enabled and remains blocked until the required CI gate passes. After merge, protected main publishes ${RELEASE_TAG} to GitHub and Packagist automatically."
+            echo "The pull-request workflow was approved for the exact release commit and auto-merge remained blocked until its required CI gate passed. Protected main was then dispatched explicitly to publish ${RELEASE_TAG} to GitHub and Packagist."
           } >> "$GITHUB_STEP_SUMMARY"
