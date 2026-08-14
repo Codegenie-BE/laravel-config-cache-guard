@@ -108,7 +108,7 @@ jobs:
           fi
 
           gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${approval_run_id}/approve"
-          gh pr merge "${pr_url}" --auto --squash --delete-branch
+          gh pr merge "${pr_url}" --auto --squash
 
           # A merge performed by GITHUB_TOKEN does not emit a recursive push run.
           # Keep this job alive until auto-merge completes, then dispatch protected
@@ -135,6 +135,9 @@ jobs:
             exit 1
           fi
 
+          # gh cannot defer --delete-branch until a future auto-merge. Delete the
+          # exact generated release branch only after GitHub reports it as merged.
+          git push origin --delete "${branch}"
           gh workflow run tests.yml --ref main
 
           {
