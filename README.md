@@ -546,6 +546,8 @@ GitHub Actions runs the complete package test matrix and a fresh-application E2E
 
 All seven compatible runtime pairs run as both package and E2E tests on Ubuntu Linux x64 and Windows x64. Package tests keep the minimum and latest supported pairs on macOS ARM64, Linux ARM64 and Alpine Linux; their E2E jobs use the latest pair. This produces 37 compatibility jobs instead of 70 while preserving complete Windows/Linux x64 coverage and representative portability checks. Two Linux jobs test the lowest supported Composer dependency set, pull requests receive dependency review, coverage includes the real pre-bootstrap guard, and one stable `CI gate` combines every required result. The complete workflow also runs weekly to detect upstream runner or dependency drift.
 
+Stable releases use a release pull request. A maintainer starts **Prepare release branch** from GitHub Actions and selects a patch, minor or major increment. The workflow prepares and pushes the versioned changelog, then provides the direct PR link; organization policy keeps the final PR-opening click with a maintainer. After that PR is reviewed and merged, the protected `main` workflow publishes only after the complete CI gate passes. It creates the annotated tag, tests the exact release ZIP, uploads its checksum and provenance, creates the GitHub Release and verifies that the existing Packagist webhook exposes the same version and commit. No Packagist token or local signing key is required.
+
 ## Uninstall
 
 Remove the package:

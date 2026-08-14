@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   pull_request:
   workflow_dispatch:
   schedule:
@@ -431,8 +429,10 @@ jobs:
           fi
 
   release:
-    name: Build and publish signed release
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish pending release
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs:
       - ci-gate
     runs-on: ubuntu-latest
@@ -449,32 +449,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require a verified annotated tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag_target="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}" --jq '.object')"
-          tag_type="$(jq --raw-output '.type' <<< "$tag_target")"
-          tag_sha="$(jq --raw-output '.sha' <<< "$tag_target")"
-
-          if [ "$tag_type" != "tag" ]; then
-            echo "Release tags must be annotated and cryptographically signed."
-            exit 1
-          fi
-
-          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.verification.verified')" != "true" ]; then
-            echo "GitHub could not verify the release tag signature."
-            exit 1
-          fi
-
-          git fetch --no-tags origin main
-          tag_commit="$(git rev-list --max-count=1 "${GITHUB_REF_NAME}")"
-
-          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
-            echo "The release tag must point to a commit contained in main."
-            exit 1
-          fi
-
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
@@ -483,53 +457,152 @@ jobs:
           tools: composer:v2
           extensions: fileinfo, zip
 
+      - name: Detect pending changelog release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --no-tags origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "Only the current main commit may be released."
+            exit 1
+          fi
+
+          tag="$(php tests/Support/detect-release.php)"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+            tag_commit="$(git rev-list --max-count=1 "${tag}")"
+
+            if [ "$tag_commit" != "$(git rev-parse HEAD)" ]; then
+              {
+                echo "tag=${tag}"
+                echo "publish=false"
+                echo "verify=false"
+                echo "create-tag=false"
+              } >> "$GITHUB_OUTPUT"
+              echo "${tag} is already published from an earlier main commit."
+              exit 0
+            fi
+
+            if gh release view "${tag}" >/dev/null 2>&1; then
+              {
+                echo "tag=${tag}"
+                echo "publish=false"
+                echo "verify=true"
+                echo "create-tag=false"
+              } >> "$GITHUB_OUTPUT"
+              echo "${tag} is already released; Packagist will be verified."
+              exit 0
+            fi
+
+            {
+              echo "tag=${tag}"
+              echo "publish=true"
+              echo "verify=true"
+              echo "create-tag=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "${tag} already exists on this commit; release publication will resume."
+            exit 0
+          fi
+
+          php tests/Support/validate-release-tag.php "${tag}"
+          {
+            echo "tag=${tag}"
+            echo "publish=true"
+            echo "verify=true"
+            echo "create-tag=true"
+          } >> "$GITHUB_OUTPUT"
+          echo "${tag} will be published from $(git rev-parse HEAD)."
+
       - name: Install dependencies
+        if: steps.release.outputs.publish == 'true'
         run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate release tag and changelog
-        run: php tests/Support/validate-release-tag.php "${GITHUB_REF_NAME}"
+        if: steps.release.outputs.publish == 'true'
+        run: php tests/Support/validate-release-tag.php "${{ steps.release.outputs.tag }}"
 
       - name: Run source quality gate
+        if: steps.release.outputs.publish == 'true'
         run: composer check
 
       - name: Build release archive
+        if: steps.release.outputs.publish == 'true'
         run: |
           mkdir --parents dist
-          composer archive --format=zip --dir=dist --file="laravel-config-cache-guard-${GITHUB_REF_NAME}"
+          composer archive --format=zip --dir=dist --file="laravel-config-cache-guard-${{ steps.release.outputs.tag }}"
 
       - name: Test the exact release archive
+        if: steps.release.outputs.publish == 'true'
         env:
           COMPOSER_PROCESS_TIMEOUT: 0
-        run: php tests/E2E/LaravelConfigCacheGuardE2e.php --package-archive="dist/laravel-config-cache-guard-${GITHUB_REF_NAME}.zip"
+        run: php tests/E2E/LaravelConfigCacheGuardE2e.php --package-archive="dist/laravel-config-cache-guard-${{ steps.release.outputs.tag }}.zip"
 
       - name: Build release checksum
+        if: steps.release.outputs.publish == 'true'
         run: |
           cd dist
           sha256sum ./*.zip > SHA256SUMS
 
       - name: Upload workflow artifact
+        if: steps.release.outputs.publish == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: laravel-config-cache-guard-${{ github.ref_name }}
+          name: laravel-config-cache-guard-${{ steps.release.outputs.tag }}
           path: |
             dist/*.zip
             dist/SHA256SUMS
           if-no-files-found: error
 
       - name: Attest release provenance
+        if: steps.release.outputs.publish == 'true'
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: |
             dist/*.zip
             dist/SHA256SUMS
 
+      - name: Create annotated release tag
+        if: steps.release.outputs.create-tag == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "${{ steps.release.outputs.tag }}" --message "${{ steps.release.outputs.tag }}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.release.outputs.tag }}"
+
       - name: Publish GitHub release
+        if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
-          gh release create "${GITHUB_REF_NAME}"
+          gh release create "${{ steps.release.outputs.tag }}"
           dist/*.zip
           dist/SHA256SUMS
           --verify-tag
           --generate-notes
-          --title "${GITHUB_REF_NAME}"
+          --title "${{ steps.release.outputs.tag }}"
+
+      - name: Verify Packagist publication
+        if: steps.release.outputs.verify == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              "https://packagist.org/packages/codegenie-be/laravel-config-cache-guard.json" \
+              | jq --exit-status \
+                --arg tag "${RELEASE_TAG}" \
+                --arg commit "${RELEASE_COMMIT}" \
+                '.package.versions[$tag].source.reference == $commit' >/dev/null; then
+              echo "Packagist exposes ${RELEASE_TAG} at ${RELEASE_COMMIT}."
+              exit 0
+            fi
+
+            echo "Waiting for Packagist (${attempt}/30)..."
+            sleep 10
+          done
+
+          echo "Packagist did not expose ${RELEASE_TAG} at ${RELEASE_COMMIT} within five minutes."
+          exit 1
