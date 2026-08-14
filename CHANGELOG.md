@@ -4,6 +4,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.4.2 - 2026-08-14
+
 - Completed unattended releases by approving only the generated pull-request CI run for the exact release commit and explicitly dispatching protected `main` after the bot auto-merges.
 
 ## v1.4.1 - 2026-08-14
