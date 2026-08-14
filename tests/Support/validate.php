@@ -407,8 +407,9 @@ foreach ([
     '--event pull_request',
     '.headSha == \"${release_sha}\" and .conclusion == \"action_required\"',
     'actions/runs/${approval_run_id}/approve',
-    'gh pr merge "${pr_url}" --auto --squash --delete-branch',
+    'gh pr merge "${pr_url}" --auto --squash',
     'if [ "${pr_state}" = "MERGED" ]',
+    'git push origin --delete "${branch}"',
     'gh workflow run tests.yml --ref main',
 ] as $requirement) {
     if (! str_contains($prepareReleaseWorkflow, $requirement)) {
