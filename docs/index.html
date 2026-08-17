@@ -30,7 +30,6 @@
     "programmingLanguage": "PHP",
     "runtimePlatform": "PHP 8.2-8.5 and Laravel 12-13",
     "license": "https://opensource.org/license/mit",
-    "version": "1.5.0",
     "author": {
       "@type": "Organization",
       "name": "Codegenie",
@@ -57,14 +56,14 @@
     <section class="hero" id="top" aria-labelledby="hero-title">
       <div class="shell hero-grid">
         <div>
-          <p class="eyebrow">v1.5.0 · Laravel 12–13 · PHP 8.2–8.5 · MIT</p>
+          <p class="eyebrow">Laravel 12–13 · PHP 8.2–8.5 · MIT</p>
           <h1 id="hero-title">Never serve stale Laravel config or routes after a deployment.</h1>
           <p class="lede">Detect relevant source or runtime-path changes before Laravel boots, reject stale deployment cache and repair safely — even on FTP or shared hosting where <code>exec()</code> is disabled.</p>
           <div class="install" aria-label="Composer installation command">
             <span aria-hidden="true">$</span>
             <code>composer require codegenie-be/laravel-config-cache-guard</code>
           </div>
-          <p class="install-note">That single Composer command completes installation. Optionally verify it with <code>php artisan config-cache-guard:status</code>. No change to <code>public/index.php</code> is required.</p>
+          <p class="install-note">That single Composer command completes installation. Verify deployment health with <code>php artisan config-cache-guard:status --strict</code>. No change to <code>public/index.php</code> is required.</p>
           <div class="actions">
             <a class="button primary" href="https://packagist.org/packages/codegenie-be/laravel-config-cache-guard">Install from Packagist</a>
             <a class="button secondary" href="https://github.com/Codegenie-BE/laravel-config-cache-guard">View source and docs</a>
@@ -110,6 +109,7 @@
           <li><strong>Detect</strong><span>Composer loads the guard before <code>bootstrap/app.php</code>. It compares source signatures and a one-way runtime identity for config cache.</span></li>
           <li><strong>Reject</strong><span>Changed sources or a relocated config runtime make stale config cache unavailable; stale routes move to a current signature-based path.</span></li>
           <li><strong>Repair</strong><span>Use PHP CLI when available, or queue internal <code>Artisan::call()</code> repair after the response.</span></li>
+          <li><strong>Synchronize</strong><span>Successful native <code>config:cache</code> and <code>route:cache</code> commands immediately register their new guard signatures.</span></li>
           <li><strong>Continue</strong><span>The request never needs to consume known-stale config or routes. Later requests use rebuilt cache.</span></li>
         </ol>
         <p class="fine-print">The runtime identity stores hashes derived from the application path and OS family, not raw server filesystem paths.</p>
@@ -173,7 +173,7 @@
         </details>
         <details>
           <summary>Should deployment scripts still run config:cache?</summary>
-          <p>When destination commands are available, yes: they remain the preferred production flow. On FTP-only/shared hosting without SSH or deploy hooks, the package's in-app fallback is explicitly supported instead.</p>
+          <p>When destination commands are available, yes. Successful native config/route cache commands synchronize the guard state immediately, and <code>config-cache-guard:status --strict</code> can verify freshness before traffic is switched.</p>
         </details>
       </div>
     </section>
