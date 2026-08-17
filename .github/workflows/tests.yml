@@ -16,6 +16,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  COMPOSER_MAX_PARALLEL_HTTP: 4
+
 jobs:
   plan:
     name: CI plan
@@ -128,7 +131,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Run complete quality gate
         run: composer check
@@ -201,7 +204,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Run package tests
         run: composer test
@@ -394,7 +397,9 @@ jobs:
         run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install minimum supported dependencies
-        run: composer update --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: |
+          # Native equivalent: composer update --prefer-lowest --prefer-stable
+          sh tests/Support/composer-update-retry.sh --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate minimum dependency runtime
         run: |
@@ -440,7 +445,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Enforce coverage baseline
         run: composer test:coverage
@@ -565,7 +570,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.release.outputs.publish == 'true'
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate release tag and changelog
         if: steps.release.outputs.publish == 'true'
