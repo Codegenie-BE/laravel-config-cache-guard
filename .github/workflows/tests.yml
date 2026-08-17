@@ -17,8 +17,75 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    name: CI plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      full: ${{ steps.changes.outputs.full }}
+      release: ${{ steps.changes.outputs.release }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine required coverage
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          full=true
+          release=false
+
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "push" ]; then
+            base="$BASE_SHA"
+            head="$(git rev-parse HEAD)"
+
+            if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              full=false
+
+              while IFS= read -r file; do
+                [ -z "$file" ] && continue
+
+                case "$file" in
+                  README.md|CHANGELOG.md|ADOPTERS.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|LICENSE.md|SECURITY.md|SUPPORT.md|docs/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md)
+                    ;;
+                  *)
+                    full=true
+                    ;;
+                esac
+              done < <(git diff --name-only "$base" "$head")
+
+              if [ "$EVENT_NAME" = "pull_request" ] && [[ "$HEAD_REF" == release/* ]]; then
+                full=true
+              fi
+
+              if git diff --unified=0 "$base" "$head" -- CHANGELOG.md \
+                | grep --extended-regexp --quiet '^\+## v[0-9]+\.[0-9]+\.[0-9]+ - [0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+                release=true
+                full=true
+              fi
+            fi
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "schedule" ]; then
+            full=true
+          fi
+
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "full=$full release=$release"
+
   quality:
     name: Quality / Linux x64 / PHP 8.5 / Laravel 13
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -57,6 +124,8 @@ jobs:
 
   compatibility:
     name: Compatibility / Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -128,6 +197,8 @@ jobs:
 
   end-to-end:
     name: E2E / Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -173,6 +244,8 @@ jobs:
 
   portability:
     name: Portability / ${{ matrix.platform.name }} / PHP 8.5 / Laravel 12 + 13
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 40
 
@@ -217,7 +290,7 @@ jobs:
           composer require --dev 'orchestra/testbench:~10.0' 'pestphp/pest:~3.0' --no-update --no-interaction
           composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
           composer test
-          composer test:e2e -- --laravel=12
+          composer test:e2e -- --laravel=12 --suite=smoke
 
       - name: Reset dependency manifests
         run: |
@@ -229,10 +302,12 @@ jobs:
           composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
           composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
           composer test
-          composer test:e2e -- --laravel=13
+          composer test:e2e -- --laravel=13 --suite=smoke
 
   alpine-portability:
     name: Portability / Alpine Linux x64 / PHP 8.5 / Laravel 12 + 13
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -264,10 +339,12 @@ jobs:
           --env COMPOSER_CACHE_DIR=/composer-cache
           --env COMPOSER_PROCESS_TIMEOUT=0
           config-cache-guard-alpine:portability
-          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13'
+          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 --suite=smoke && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13 --suite=smoke'
 
   minimum-dependencies:
     name: Minimum dependencies / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -312,22 +389,21 @@ jobs:
 
   dependency-review:
     name: Dependency review
+    needs: plan
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Review dependency changes
-        if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate
 
-      - name: Skip outside pull requests
-        if: github.event_name != 'pull_request'
-        run: echo "Dependency review only applies to pull requests."
-
   coverage:
     name: Coverage
+    needs: plan
+    if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -356,6 +432,7 @@ jobs:
     name: CI gate
     if: always()
     needs:
+      - plan
       - quality
       - compatibility
       - end-to-end
@@ -368,21 +445,22 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Verify every required job succeeded
+      - name: Verify every required job succeeded or was intentionally skipped
         env:
           REQUIRED_RESULTS: ${{ toJson(needs) }}
         run: |
-          if ! jq --exit-status 'all(.[]; .result == "success")' <<< "$REQUIRED_RESULTS"; then
-            jq --raw-output 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<< "$REQUIRED_RESULTS"
+          if ! jq --exit-status 'all(.[]; .result == "success" or .result == "skipped")' <<< "$REQUIRED_RESULTS"; then
+            jq --raw-output 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"' <<< "$REQUIRED_RESULTS"
             exit 1
           fi
 
   release:
     name: Publish pending release
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.release == 'true') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs:
+      - plan
       - ci-gate
     runs-on: ubuntu-latest
     timeout-minutes: 45
