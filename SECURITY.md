@@ -14,12 +14,15 @@ Codegenie Laravel Config Cache Guard is intentionally small and file-based.
 
 It is designed to prevent Laravel from using stale deployment cache files without adding queues, cron, Redis, a database, middleware or a public repair endpoint.
 
+Config cache signatures are also bound to a one-way runtime identity derived from the normalized application base path, canonical base path and OS family. This prevents a signed config cache generated at another application path or operating system from being trusted after relocation. Raw runtime filesystem paths are not written to the signature file.
+
 ## What the package may do
 
 The package may:
 
 - compare file metadata for `.env`, `.env.{APP_ENV}`, config files, route files, application providers, active bootstrap registration files and Composer dependency metadata
 - optionally hash those source-file contents in memory when `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content`; only the aggregate one-way signature is persisted
+- bind config source signatures to a one-way runtime identity so config cache relocated from another application path or operating system is rejected before Laravel boots
 - remove stale config cache from Laravel's active cache path, including an externally configured `APP_CONFIG_CACHE` path
 - remove or bypass stale route cache in Laravel's active bootstrap cache directory
 - run fixed deployment-cache argument arrays through a bounded PHP CLI process when `proc_open()` is available
@@ -34,6 +37,7 @@ The package may:
 The package does not:
 
 - log or store `.env` values; content-signature mode reads file bytes only to calculate a one-way hash
+- persist raw application or canonical runtime filesystem paths in deployment signatures
 - snapshot arbitrary environment variables or persist the documented control-variable snapshot to disk
 - store secrets, tokens, cookies or authorization headers
 - send data to external services
@@ -72,7 +76,7 @@ They contain:
 - safe human-readable message
 - suggested action
 
-They do not contain `.env` values, command output, exception traces, secrets or tokens.
+They do not contain `.env` values, raw runtime paths, command output, exception traces, secrets or tokens.
 
 ## Recommended production setup
 
@@ -82,4 +86,4 @@ They do not contain `.env` values, command output, exception traces, secrets or 
 - Configure pre-bootstrap overrides such as `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` and `CONFIG_CACHE_GUARD_*` at process or web-server level; values placed only in `.env` load too late for the Composer guard.
 - Do not place backups or logs under the public webroot.
 - Use this package as a safety net, not as a replacement for deployment checks.
-- Prefer running `php artisan config:cache` and `php artisan route:cache` during deployment when your hosting supports it.
+- Prefer running `php artisan config:cache` and `php artisan route:cache` during deployment when your hosting supports it. On FTP-only/shared hosting without destination command access, keep the active cache directory writable and use the documented in-app fallback instead.

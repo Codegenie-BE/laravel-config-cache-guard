@@ -5,6 +5,12 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 ## Unreleased
 
 - Reduced CI fan-out by keeping the complete PHP/Laravel compatibility matrix on Linux x64 while reusing one PHP 8.5 runner per Windows x64, macOS ARM64, Linux ARM64 and Alpine environment to test both Laravel 12 and 13, with representative minimum-runtime E2E coverage retained on Linux.
+- Added change-aware CI planning so documentation-only pull requests skip expensive compatibility, portability, E2E, minimum-dependency and coverage jobs while preserving the stable required `CI gate`.
+- Added a focused cross-platform portability smoke suite and E2E dispatcher; portability fixtures use `composer create-project --no-install` and resolve Laravel plus this package in one Composer dependency phase, while full Linux and release-archive E2E coverage remains unchanged.
+- Split the fast non-Pest quality gate into `composer check` and added `composer check:all` for the complete local quality plus Pest suite, avoiding an unnecessary duplicate Pest run in CI while keeping coverage independent.
+- Limited dependency review to pull requests and prevented ordinary `main` pushes from allocating a release runner unless the changelog diff introduces a newly prepared dated SemVer release.
+- Updated the release artifact upload action to the exact `actions/upload-artifact` v7.0.1 commit, removing the deprecated Node.js 20 action runtime from future release runs.
+- Refreshed README, contributor, security and GitHub Pages documentation for Laravel 12/13, v1.5.0 runtime-bound config signatures, current CI coverage and the supported FTP-only/shared-hosting fallback.
 - Clarified that destination-side Artisan commands are optional on FTP-only/shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
 
 ## v1.5.0 - 2026-08-17
