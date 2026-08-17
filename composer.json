@@ -95,11 +95,15 @@
             "@check:security",
             "@check:autoload",
             "@format:test",
-            "@analyse",
+            "@analyse"
+        ],
+        "check:all": [
+            "@check",
             "@test"
         ],
         "check:release": [
             "@check",
+            "@test",
             "@test:e2e:archive"
         ],
         "check:autoload": "@composer dump-autoload --optimize --strict-psr --no-interaction",
@@ -133,8 +137,9 @@
     },
     "scripts-descriptions": {
         "analyse": "Run PHPStan at the configured maximum level.",
-        "check": "Run every local quality gate in the same order as CI.",
-        "check:release": "Run the fast quality gate and real Laravel 12/13 application end-to-end tests.",
+        "check": "Run the fast metadata, distribution, security, formatting and static-analysis quality gate without repeating Pest.",
+        "check:all": "Run the fast quality gate and the Pest suite.",
+        "check:release": "Run the fast quality gate, Pest and exact release-archive Laravel 12/13 end-to-end tests.",
         "check:autoload": "Generate an optimized autoloader and enforce strict PSR mappings.",
         "check:composer": "Validate composer.json and lock-file consistency strictly.",
         "check:distribution": "Build and inspect the Composer archive so development files and vendor dependencies cannot leak into releases.",
