@@ -40,6 +40,12 @@ final class DeploymentCacheTracker
         }
 
         self::clearRepairState($cachePath, 'config');
+        SuccessMarker::write(
+            $cachePath.'/config-cache-refresh.succeeded',
+            'config',
+            $cacheFile,
+            $signature
+        );
 
         return true;
     }
@@ -58,37 +64,51 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        self::seedVersionedRouteCache($cacheFile, $cachePath, $signature);
+        $trackedCacheFile = self::seedVersionedRouteCache($cacheFile, $cachePath, $signature);
 
-        if (! DeploymentCacheSignatures::write($cachePath.'/route-source.signature', $signature)) {
+        if (
+            $trackedCacheFile === null
+            || ! DeploymentCacheSignatures::write($cachePath.'/route-source.signature', $signature)
+        ) {
             return false;
         }
 
         self::clearRepairState($cachePath, 'route');
+        SuccessMarker::write(
+            $cachePath.'/route-cache-refresh.succeeded',
+            'route',
+            $trackedCacheFile,
+            $signature
+        );
 
         return true;
     }
 
-    private static function seedVersionedRouteCache(string $cacheFile, string $cachePath, string $signature): void
-    {
+    private static function seedVersionedRouteCache(
+        string $cacheFile,
+        string $cachePath,
+        string $signature
+    ): ?string {
         if (
             Environment::string('APP_ROUTES_CACHE') !== null
             || ! Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
         ) {
-            return;
+            return $cacheFile;
         }
 
         $versionedPath = rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
 
         if (self::normalizePath($cacheFile) === self::normalizePath($versionedPath)) {
-            return;
+            return $cacheFile;
         }
 
         $contents = @file_get_contents($cacheFile);
 
-        if (is_string($contents)) {
-            AtomicFile::write($versionedPath, $contents);
+        if (! is_string($contents) || ! AtomicFile::write($versionedPath, $contents)) {
+            return null;
         }
+
+        return $versionedPath;
     }
 
     private static function clearRepairState(string $cachePath, string $target): void
