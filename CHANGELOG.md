@@ -4,6 +4,13 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.5.0 - 2026-08-17
+
+- Bound config deployment signatures to a hashed runtime identity derived from the normalized application base path, canonical base path and OS family, so config cache built or signed at another runtime path is rejected before Laravel can load absolute paths from the wrong environment.
+- Reused the existing pre-bootstrap invalidation, locking, CLI rebuild and deferred in-app repair flow instead of adding a second cache-state mechanism or new configuration surface.
+- Added regression coverage for identical content signatures across different runtime paths and for a signed config cache whose application directory is moved before boot.
+- Updated deployment guidance to prefer destination-side cache generation and document the safe fallback behavior for CI, FTP, cPanel and other relocated release artifacts.
+
 ## v1.4.3 - 2026-08-14
 
 - Delete the exact generated release branch after protected auto-merge instead of leaving completed release branches on the remote.
