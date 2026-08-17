@@ -116,7 +116,7 @@
         "test:coverage": "pest --coverage --min=80",
         "test:e2e": [
             "Composer\\Config::disableProcessTimeout",
-            "@php tests/E2E/LaravelConfigCacheGuardE2e.php"
+            "@php tests/E2E/runner.php"
         ],
         "test:e2e:archive": [
             "Composer\\Config::disableProcessTimeout",
@@ -144,7 +144,7 @@
         "format:test": "Check Laravel Pint formatting without changing files.",
         "test": "Run the Pest test suite.",
         "test:coverage": "Run the Pest suite with Xdebug and enforce the non-decreasing coverage baseline.",
-        "test:e2e": "Install the source checkout into fresh Laravel applications and test real cache repair over HTTP.",
+        "test:e2e": "Run full Laravel application E2E by default, or the optimized portability suite with --suite=smoke.",
         "test:e2e:archive": "Build the release ZIP, install that exact artifact into fresh Laravel applications and run the end-to-end suite."
     }
 }
