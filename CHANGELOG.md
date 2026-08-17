@@ -13,7 +13,7 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Limited dependency review to pull requests and prevented ordinary `main` pushes from allocating a release runner unless the changelog diff introduces a newly prepared dated SemVer release.
 - Updated the release artifact upload action to the exact `actions/upload-artifact` v7.0.1 commit, removing the deprecated Node.js 20 action runtime from future release runs.
 - Refreshed README, contributor, security and GitHub Pages documentation for Laravel 12/13, v1.5.0 runtime-bound config signatures, current CI coverage and the supported FTP-only/shared-hosting fallback.
-- Clarified that destination-side Artisan commands are optional on FTP-only/shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
+- Clarified that destination-side Artisan commands are optional on FTP-only shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
 - Recorded successful native `config:cache` and `route:cache` commands through Laravel's command-finished event so correctly generated deployment caches receive current guard signatures immediately instead of being rebuilt again on the first HTTP request.
 - Seeded the current signature-based route-cache file after a successful native `route:cache` command when versioned route caching is enabled and no custom route cache path is configured.
 - Strengthened `config-cache-guard:status --strict` so it compares active cache signatures with the current source/runtime state and fails for stale, missing, unreadable or unavailable signatures and for a missing expected versioned route-cache file.
@@ -21,6 +21,7 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Surfaced major GitHub Actions upgrades for manual review instead of globally ignoring them in Dependabot, while keeping automatic merge limited to minor/patch updates; also updated `actions/attest-build-provenance` to 3.2.0.
 - Removed hardcoded package-version metadata from the GitHub Pages site so release information cannot become stale independently from Packagist and GitHub Releases.
 - Reduced transient GitHub/Composer portability failures by limiting Composer HTTP concurrency to four and retrying failed portability dependency updates up to two additional times with bounded 10/20-second backoff, while leaving Composer 2.10's security-oriented dist-to-source fallback disabled.
+- Made pending release publication recoverable after transient CI failures by re-detecting the latest changelog tag on `main`, preserving a pending release until it is tagged on another commit, and allowing the release job to evaluate after a successful rerun of the aggregate CI gate.
 
 ## v1.5.0 - 2026-08-17
 
