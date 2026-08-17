@@ -4,6 +4,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.5.1 - 2026-08-17
+
 - Reduced CI fan-out by keeping the complete PHP/Laravel compatibility matrix on Linux x64 while reusing one PHP 8.5 runner per Windows x64, macOS ARM64, Linux ARM64 and Alpine environment to test both Laravel 12 and 13, with representative minimum-runtime E2E coverage retained on Linux.
 - Added change-aware CI planning so documentation-only pull requests skip expensive compatibility, portability, E2E, minimum-dependency and coverage jobs while preserving the stable required `CI gate`.
 - Added a focused cross-platform portability smoke suite and E2E dispatcher; portability fixtures use `composer create-project --no-install` and resolve Laravel plus this package in one Composer dependency phase, while full Linux and release-archive E2E coverage remains unchanged.
@@ -12,11 +14,13 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Updated the release artifact upload action to the exact `actions/upload-artifact` v7.0.1 commit, removing the deprecated Node.js 20 action runtime from future release runs.
 - Refreshed README, contributor, security and GitHub Pages documentation for Laravel 12/13, v1.5.0 runtime-bound config signatures, current CI coverage and the supported FTP-only/shared-hosting fallback.
 - Clarified that destination-side Artisan commands are optional on FTP-only/shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
-- Record successful native `config:cache` and `route:cache` commands through Laravel's command-finished event so correctly generated deployment caches receive current guard signatures immediately instead of being rebuilt again on the first HTTP request.
-- Seed the current signature-based route-cache file after a successful native `route:cache` command when versioned route caching is enabled and no custom route cache path is configured.
-- Strengthen `config-cache-guard:status --strict` so it compares active cache signatures with the current source/runtime state and fails for stale, missing, unreadable or unavailable signatures and for a missing expected versioned route-cache file.
-- Surface major GitHub Actions upgrades for manual review instead of globally ignoring them in Dependabot, while keeping automatic merge limited to minor/patch updates; also updated `actions/attest-build-provenance` to 3.2.0.
+- Recorded successful native `config:cache` and `route:cache` commands through Laravel's command-finished event so correctly generated deployment caches receive current guard signatures immediately instead of being rebuilt again on the first HTTP request.
+- Seeded the current signature-based route-cache file after a successful native `route:cache` command when versioned route caching is enabled and no custom route cache path is configured.
+- Strengthened `config-cache-guard:status --strict` so it compares active cache signatures with the current source/runtime state and fails for stale, missing, unreadable or unavailable signatures and for a missing expected versioned route-cache file.
+- Stopped persisting raw cache filesystem paths in success markers; new markers store only a SHA-256 cache identity while legacy markers remain readable without exposing their raw path in status output.
+- Surfaced major GitHub Actions upgrades for manual review instead of globally ignoring them in Dependabot, while keeping automatic merge limited to minor/patch updates; also updated `actions/attest-build-provenance` to 3.2.0.
 - Removed hardcoded package-version metadata from the GitHub Pages site so release information cannot become stale independently from Packagist and GitHub Releases.
+- Reduced transient GitHub/Composer portability failures by limiting Composer HTTP concurrency to four and retrying failed portability dependency updates up to two additional times with bounded 10/20-second backoff, while leaving Composer 2.10's security-oriented dist-to-source fallback disabled.
 
 ## v1.5.0 - 2026-08-17
 
