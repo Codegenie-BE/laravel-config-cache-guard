@@ -4,33 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Laravel Config Cache Guard — reject stale deployment cache</title>
-  <meta name="description" content="Prevent stale Laravel config and routes after FTP or shared-hosting deployments, even when exec is disabled.">
+  <meta name="description" content="Prevent stale Laravel 12 and 13 config and routes after FTP or shared-hosting deployments, even when exec is disabled.">
   <meta name="theme-color" content="#111827">
   <link rel="canonical" href="https://codegenie-be.github.io/laravel-config-cache-guard/">
   <link rel="stylesheet" href="styles.css">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Laravel Config Cache Guard">
   <meta property="og:title" content="Never serve stale Laravel deployment cache">
-  <meta property="og:description" content="A small Laravel safety net for FTP, cPanel, Plesk and shared hosting — including servers without exec().">
+  <meta property="og:description" content="A small Laravel 12/13 safety net for FTP, cPanel, Plesk and shared hosting — including servers without exec().">
   <meta property="og:url" content="https://codegenie-be.github.io/laravel-config-cache-guard/">
   <meta property="og:image" content="https://codegenie-be.github.io/laravel-config-cache-guard/assets/social-preview.png">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Laravel Config Cache Guard">
-  <meta name="twitter:description" content="Reject stale config and route cache before Laravel boots, with safe repair on restricted hosting.">
+  <meta name="twitter:description" content="Reject stale config and route cache before Laravel boots, including config cache relocated between runtime paths.">
   <meta name="twitter:image" content="https://codegenie-be.github.io/laravel-config-cache-guard/assets/social-preview.png">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareSourceCode",
     "name": "Laravel Config Cache Guard",
-    "description": "Prevent Laravel from using stale config or route cache after deployment changes, with Composer autoload integration and in-app auto repair for shared hosting.",
+    "description": "Prevent Laravel from using stale config or route cache after deployment changes, with runtime-bound config signatures and in-app auto repair for shared hosting.",
     "codeRepository": "https://github.com/Codegenie-BE/laravel-config-cache-guard",
     "programmingLanguage": "PHP",
     "runtimePlatform": "PHP 8.2-8.5 and Laravel 12-13",
     "license": "https://opensource.org/license/mit",
-    "version": "1.3.1",
+    "version": "1.5.0",
     "author": {
       "@type": "Organization",
       "name": "Codegenie",
@@ -57,9 +57,9 @@
     <section class="hero" id="top" aria-labelledby="hero-title">
       <div class="shell hero-grid">
         <div>
-          <p class="eyebrow">Laravel 12–13 · PHP 8.2–8.5 · MIT</p>
+          <p class="eyebrow">v1.5.0 · Laravel 12–13 · PHP 8.2–8.5 · MIT</p>
           <h1 id="hero-title">Never serve stale Laravel config or routes after a deployment.</h1>
-          <p class="lede">Detect relevant source changes before Laravel boots, reject stale deployment cache and repair safely — even on FTP or shared hosting where <code>exec()</code> is disabled.</p>
+          <p class="lede">Detect relevant source or runtime-path changes before Laravel boots, reject stale deployment cache and repair safely — even on FTP or shared hosting where <code>exec()</code> is disabled.</p>
           <div class="install" aria-label="Composer installation command">
             <span aria-hidden="true">$</span>
             <code>composer require codegenie-be/laravel-config-cache-guard</code>
@@ -87,8 +87,8 @@
       <div class="shell">
         <div class="section-heading">
           <p class="eyebrow">Verified behavior</p>
-          <h2 id="demo-title">A real Laravel 13 repair scenario</h2>
-          <p>The flow below mirrors the package E2E test: Composer installs the release artifact into a fresh application, source files change, PHP runs with external process control disabled and real HTTP requests verify the uncached and repaired states.</p>
+          <h2 id="demo-title">Real Laravel 12 and 13 coverage</h2>
+          <p>The full E2E suite installs the release artifact into fresh Laravel applications, builds real deployment caches and verifies CLI and process-control-disabled repair over HTTP. Cross-platform smoke tests additionally validate the pre-bootstrap repair path on Windows, macOS ARM64, Linux ARM64 and Alpine.</p>
         </div>
         <figure class="demo-frame">
           <picture>
@@ -107,11 +107,12 @@
           <h2 id="works-title">How it works</h2>
         </div>
         <ol class="steps">
-          <li><strong>Detect</strong><span>Composer loads the guard before <code>bootstrap/app.php</code>. It compares safe file metadata signatures.</span></li>
-          <li><strong>Reject</strong><span>Changed sources make stale config cache unavailable and route cache move to a current signature-based path.</span></li>
+          <li><strong>Detect</strong><span>Composer loads the guard before <code>bootstrap/app.php</code>. It compares source signatures and a one-way runtime identity for config cache.</span></li>
+          <li><strong>Reject</strong><span>Changed sources or a relocated config runtime make stale config cache unavailable; stale routes move to a current signature-based path.</span></li>
           <li><strong>Repair</strong><span>Use PHP CLI when available, or queue internal <code>Artisan::call()</code> repair after the response.</span></li>
           <li><strong>Continue</strong><span>The request never needs to consume known-stale config or routes. Later requests use rebuilt cache.</span></li>
         </ol>
+        <p class="fine-print">The runtime identity stores hashes derived from the application path and OS family, not raw server filesystem paths.</p>
       </div>
     </section>
 
@@ -136,7 +137,8 @@
         <div class="security-card">
           <h2>Security and privacy</h2>
           <ul>
-            <li>Does not read or store <code>.env</code> values</li>
+            <li>Does not store <code>.env</code> values</li>
+            <li>Does not store raw runtime paths in signatures</li>
             <li>Does not send telemetry or external requests</li>
             <li>Uses file locks and safe diagnostic markers</li>
             <li>Exposes no public repair endpoint</li>
@@ -162,12 +164,16 @@
           <p>No. Missing config cache creation is opt-in through <code>CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true</code>. Route guarding starts when route cache already exists.</p>
         </details>
         <details>
+          <summary>What happens if config cache was built on another machine or application path?</summary>
+          <p>The config signature is bound to the current runtime identity. A signed cache relocated from another runtime path is rejected before Laravel loads it and the existing repair flow rebuilds it for the destination.</p>
+        </details>
+        <details>
           <summary>What happens when external process control is disabled?</summary>
           <p>Stale config is removed, stale routes are bypassed, a safe pending marker is written and Laravel rebuilds internally through <code>Artisan::call()</code> after the response.</p>
         </details>
         <details>
           <summary>Should deployment scripts still run config:cache?</summary>
-          <p>Yes. Reliable deployment commands remain the preferred production flow. The package protects applications when those steps are skipped or unavailable.</p>
+          <p>When destination commands are available, yes: they remain the preferred production flow. On FTP-only/shared hosting without SSH or deploy hooks, the package's in-app fallback is explicitly supported instead.</p>
         </details>
       </div>
     </section>
