@@ -90,7 +90,7 @@ h2 { font-size: clamp(1.7rem, 3.2vw, 2.6rem); line-height: 1.12; letter-spacing:
 .demo-frame { margin: 0; overflow: hidden; border: 1px solid #222c43; border-radius: var(--radius); background: var(--terminal); box-shadow: var(--shadow); }
 .demo-frame figcaption { background: #111827; color: #cbd5e1; padding: .9rem 1.1rem; font-size: .9rem; }
 .demo-frame figcaption a { color: #ddd6fe; }
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 0; padding: 0; border: 1px solid var(--line); background: var(--line); list-style: none; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1px; margin: 0; padding: 0; border: 1px solid var(--line); background: var(--line); list-style: none; }
 .steps li { display: grid; gap: .8rem; background: var(--white); padding: 1.4rem; }
 .steps strong { color: var(--accent-dark); font-size: 1.05rem; }
 .steps span { color: var(--muted); }
