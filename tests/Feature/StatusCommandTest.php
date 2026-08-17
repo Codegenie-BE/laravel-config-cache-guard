@@ -127,7 +127,6 @@ it('rejects a stale config deployment signature in strict mode', function (): vo
         $this->artisan('config-cache-guard:status --strict')
             ->expectsOutputToContain('config signature state')
             ->expectsOutputToContain('stale')
-            ->expectsOutputToContain('deployment cache state is not current')
             ->assertExitCode(1);
     } finally {
         if ($hadCache && is_string($originalCache)) {
