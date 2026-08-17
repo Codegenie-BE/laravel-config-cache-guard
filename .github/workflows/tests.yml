@@ -148,6 +148,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         runtime:
           - php: '8.2'
@@ -222,6 +223,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         runtime:
           - php: '8.2'
@@ -270,6 +272,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         platform:
           - name: Windows x64
@@ -370,6 +373,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         runtime:
           - php: '8.2'
