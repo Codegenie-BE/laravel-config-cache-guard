@@ -28,9 +28,11 @@ The package may:
 - run fixed deployment-cache argument arrays through a bounded PHP CLI process when `proc_open()` is available
 - queue an internal pending marker when pre-bootstrap rebuilding is unavailable
 - rebuild through Laravel's own `Artisan::call()` after Laravel boots uncached
+- observe Laravel's successful `config:cache` and `route:cache` command-finished events and persist the corresponding current deployment signature
+- atomically copy a successfully generated default route cache to its current signature-based route-cache filename when versioned route cache is enabled and no custom `APP_ROUTES_CACHE` is configured
 - write safe diagnostic markers in Laravel's active bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`)
 - keep a request-local snapshot of the documented guard controls and cache-path variables so deferred repair uses the same pre-bootstrap inputs
-- atomically persist and verify source signatures before accepting rebuilt deployment cache as tracked
+- atomically persist and verify source signatures before accepting rebuilt or explicitly generated deployment cache as tracked
 
 ## What the package does not do
 
@@ -45,7 +47,7 @@ The package does not:
 - require a secret repair URL or token
 - require manual code changes in `public/index.php` for new installations
 - execute shell commands or user-controlled process arguments
-- run the guard during normal CLI/phpdbg execution unless explicitly allowed for testing
+- run the pre-bootstrap guard during normal CLI/phpdbg execution unless explicitly allowed for testing; console integration is limited to package commands and successful native cache-command completion tracking
 - call `cache:clear`, `optimize:clear`, `view:clear`, `event:clear`, migrations or Composer commands
 - use Redis, queues, workers, cron or a database
 
@@ -63,6 +65,8 @@ php artisan route:cache
 The PHP binary and Artisan paths are passed directly to `proc_open()` without invoking a shell. No user input is passed into the command. The process is terminated after `CONFIG_CACHE_GUARD_PROCESS_TIMEOUT` seconds, and filesystem-lock acquisition is bounded by `CONFIG_CACHE_GUARD_LOCK_TIMEOUT`.
 
 When bounded process control is unavailable, the package falls back to internal in-app repair through `Artisan::call()` after Laravel has booted without the stale cache file. If a known-stale cache file cannot be removed or bypassed, the guard stops the request with a safe 503 response instead of allowing Laravel to load it.
+
+Successful native cache-command tracking does not execute another command. It reacts only after Laravel reports a zero exit code, calculates the same one-way deployment signature used by the guard, and updates files inside the configured Laravel cache locations.
 
 ## Diagnostic markers
 
@@ -86,4 +90,4 @@ They do not contain `.env` values, raw runtime paths, command output, exception 
 - Configure pre-bootstrap overrides such as `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` and `CONFIG_CACHE_GUARD_*` at process or web-server level; values placed only in `.env` load too late for the Composer guard.
 - Do not place backups or logs under the public webroot.
 - Use this package as a safety net, not as a replacement for deployment checks.
-- Prefer running `php artisan config:cache` and `php artisan route:cache` during deployment when your hosting supports it. On FTP-only/shared hosting without destination command access, keep the active cache directory writable and use the documented in-app fallback instead.
+- Prefer running `php artisan config:cache` and `php artisan route:cache` during deployment when your hosting supports it, followed by `php artisan config-cache-guard:status --strict`. On FTP-only/shared hosting without destination command access, keep the active cache directory writable and use the documented in-app fallback instead.
