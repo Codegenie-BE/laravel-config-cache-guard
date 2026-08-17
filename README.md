@@ -109,6 +109,8 @@ php artisan route:cache
 
 If pre-bootstrap rebuilding cannot run because bounded PHP process control or a PHP CLI binary is unavailable, stale config cache is removed and stale route cache is bypassed with a signature-based route cache path. An internal pending marker records the exact pre-bootstrap source signature, then the service provider processes that marker with `Artisan::call()` after the current HTTP response is sent. This prevents the deferred layer from registering a different signature after Laravel has loaded `.env`.
 
+When a deployment itself successfully runs Laravel's native `config:cache` or `route:cache` command, the package records the freshly generated deployment signature after the command finishes. A normal `route:cache` command also seeds the guard's signature-based route cache file when versioned route cache is enabled and no custom `APP_ROUTES_CACHE` is configured. A correct deployment therefore does not need a first HTTP request merely to teach the guard that the cache it just built is current.
+
 ## What it does not do
 
 - It does not parse, log or store `.env` values. Content-signature mode may hash `.env` file bytes in memory without persisting the values.
@@ -122,7 +124,7 @@ If pre-bootstrap rebuilding cannot run because bounded PHP process control or a 
 - It does not run `cache:clear`, `optimize:clear`, `view:clear` or `event:clear`.
 - It does not replace a proper deployment process.
 
-The pre-bootstrap guard is loaded through Composer `autoload.files`. The package service provider only registers Artisan commands and schedules internal pending repair markers to run after the current HTTP response is sent.
+The pre-bootstrap guard is loaded through Composer `autoload.files`. The package service provider registers the diagnostic Artisan commands, records successful native config/route cache command completion, and schedules internal pending repair markers to run after the current HTTP response is sent.
 
 ## When to use this package
 
@@ -156,6 +158,8 @@ HTTP request
   -> after the response is sent, service provider processes pending marker with Artisan::call()
   -> next request uses the refreshed cache file
 ```
+
+When the deployment explicitly runs `config:cache` or `route:cache`, Laravel's successful command-finished event takes the shorter path: the package records the current signature immediately, clears resolved pending/failure state and prepares the versioned route-cache copy where applicable.
 
 This order is important. A Laravel middleware or normal service provider is too late to prevent Laravel from loading old cached config or old cached routes. The Composer-loaded guard prevents stale cache from being used. The in-app auto repair fallback only runs after the current response is sent, so Laravel's in-request view, session and routing state is not disturbed by cache rebuild commands.
 
@@ -218,6 +222,8 @@ This checks:
 - whether cached config exists
 - whether cached routes exist
 - whether the config and route signature files exist
+- whether each active deployment signature is `current`, `stale`, `missing` or unavailable
+- whether the currently expected signature-based route cache file exists
 - whether pending repair markers exist and why
 - whether failed-rebuild markers exist and why
 - when config and route cache repair last succeeded
@@ -238,6 +244,8 @@ Deployment scripts can request a non-zero exit code for unsafe or unresolved sta
 ```bash
 php artisan config-cache-guard:status --strict
 ```
+
+Strict mode validates freshness, not merely the presence of cache/signature files. It fails when an active guarded config or route cache is untracked, stale, unreadable, cannot be recalculated or is missing the currently expected signature-based route-cache file. That makes it suitable as a post-deployment health gate before traffic is switched.
 
 ## Requirements
 
@@ -336,7 +344,7 @@ The guard may create or update these files inside Laravel's active bootstrap cac
 | `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap config signature. |
 | `config-cache-refresh.failed` | Safe diagnostic marker after a failed config rebuild attempt. |
 | `config-cache-refresh.succeeded` | Safe diagnostic marker after a successful config rebuild. |
-| `routes-*.php` | Laravel's cached routes, created by `php artisan route:cache`. |
+| `routes-*.php` | Laravel's cached routes, created by `php artisan route:cache`; when versioned route cache is enabled, a successful native command also seeds the current signature-based copy. |
 | `route-source.signature` | Source signature of route, config, provider, bootstrap, environment and dependency files. |
 | `route-cache-refresh.lock` | File lock to avoid concurrent route cache rebuilds. |
 | `route-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap source signature. |
@@ -349,6 +357,8 @@ The guard may create or update these files inside Laravel's active bootstrap cac
 | --- | --- |
 | No relevant source or config-runtime change | Continue immediately. |
 | No config cache exists and `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=false` | Do nothing for config cache. |
+| Successful native `config:cache` | Record the current runtime-bound config signature and clear resolved config repair state. |
+| Successful native `route:cache` | Record the current route signature, seed the signature-based route cache when applicable and clear resolved route repair state. |
 | Config changed or its runtime identity changed and pre-bootstrap rebuild succeeds | Continue with refreshed cached config. |
 | Routes changed and pre-bootstrap rebuild succeeds | Continue with refreshed cached routes in the current signature-based route cache file. |
 | Config rebuild needs bounded process control but it is unavailable | Remove stale cached config and write a pending auto repair marker. |
@@ -369,8 +379,10 @@ After installation, you can test the config guard like this:
 
 ```bash
 php artisan config:cache
-php artisan config-cache-guard:status
+php artisan config-cache-guard:status --strict
 ```
+
+A successful native `config:cache` command now records the guard signature immediately, so the status output should report `config signature state` as `current` without requiring a browser request first.
 
 Then change a value in a file such as `config/app.php` or update its modified time:
 
@@ -378,7 +390,7 @@ Then change a value in a file such as `config/app.php` or update its modified ti
 touch config/app.php
 ```
 
-Load the application once in the browser. If `proc_open()` and PHP CLI are available, the guard should rebuild the active config cache and update `config-source.signature` in the active Laravel bootstrap cache directory.
+`php artisan config-cache-guard:status --strict` should now report the config signature as stale. Load the application once in the browser. If `proc_open()` and PHP CLI are available, the guard should rebuild the active config cache and update `config-source.signature` in the active Laravel bootstrap cache directory.
 
 If bounded process control is disabled, the first request removes the stale config cache and queues in-app auto repair after the response. A following request should use the refreshed config cache if the repair succeeded.
 
@@ -386,8 +398,10 @@ To test the route guard, first make sure your app already uses route cache:
 
 ```bash
 php artisan route:cache
-php artisan config-cache-guard:status
+php artisan config-cache-guard:status --strict
 ```
+
+A successful native `route:cache` command records the route signature and, with default versioned route caching, prepares the current signature-based route-cache copy. Strict status should therefore be current immediately after the command.
 
 Then change a route file or update its modified time:
 
@@ -408,9 +422,10 @@ A deployment target that exposes a reliable command runner should still include:
 ```bash
 php artisan config:cache
 php artisan route:cache
+php artisan config-cache-guard:status --strict
 ```
 
-Only run `php artisan route:cache` in deployments when your application supports Laravel route caching.
+Only run `php artisan route:cache` in deployments when your application supports Laravel route caching. Successful native config/route cache commands synchronize the guard's deployment signatures before they return, so the strict status command can validate the resulting cache state before traffic is switched.
 
 On FTP-only/shared hosting where SSH, Terminal or deployment hooks are not available, destination-side Artisan is not a package requirement. Keep the active Laravel cache directory writable and use the documented in-app fallback. See [Deployment recipes](docs/deployment-recipes.md).
 
@@ -433,6 +448,10 @@ On FTP-only/shared hosting where SSH, Terminal or deployment hooks are not avail
 ### The status command says `Bounded process control available: no`
 
 Your hosting disables one or more required process-control functions. The guard can still remove stale cached config and bypass stale cached routes. With `CONFIG_CACHE_GUARD_AUTO_REPAIR=true`, it can then rebuild through `Artisan::call()` after the current HTTP response is sent.
+
+### The status command reports a stale, missing or unavailable signature
+
+An active cache exists, but the guard cannot prove that cache matches the current source/runtime state. `--strict` intentionally returns a failure in that situation. Run the relevant native cache command (`config:cache` or `route:cache`) on the destination when available, or let one guarded HTTP request perform the configured repair path. Then rerun `php artisan config-cache-guard:status --strict`.
 
 ### I see `config-cache-refresh.pending` or `route-cache-refresh.pending`
 
@@ -557,6 +576,7 @@ GitHub Actions deliberately separates runtime compatibility from platform portab
 - A stable `CI gate` combines required results. Intentionally skipped jobs are accepted only when the CI planner classified them as unnecessary for that change.
 - Documentation-only pull requests keep the required `CI gate` but skip the expensive runtime, E2E, portability, minimum-dependency and coverage jobs.
 - Runtime, Composer, test, workflow, release and scheduled weekly checks run the full matrix.
+- Dependabot automatically merges only safe minor/patch GitHub Actions or direct development-dependency updates; major GitHub Actions upgrades remain visible for manual compatibility review instead of being silently ignored.
 
 Stable releases use a release pull request. A maintainer starts **Prepare release PR** from GitHub Actions and selects a patch, minor or major increment. The workflow prepares the versioned changelog, opens the release PR, approves the generated test run for that exact release commit and enables auto-merge. The protected branch keeps that merge blocked until the required `CI gate` passes. After auto-merge, the workflow explicitly starts protected `main`. The release job only allocates on a normal main push when the changelog diff introduces a newly prepared dated SemVer release, or when main is explicitly dispatched. It then creates the annotated tag, tests the exact release ZIP, uploads its checksum and provenance, creates the GitHub Release and verifies that Packagist exposes the same version and commit. No Packagist token or local signing key is required.
 
@@ -600,7 +620,7 @@ This package is intentionally small and file-based.
 - It does not use a database.
 - It does not require Redis, queues, workers or cron.
 - It uses file locks to avoid concurrent rebuilds.
-- It atomically replaces and verifies source-signature files before a rebuilt cache is accepted as tracked deployment state.
+- It atomically replaces and verifies source-signature files before a rebuilt or explicitly generated cache is accepted as tracked deployment state.
 - It keeps only a request-local snapshot of the documented non-secret guard controls and cache paths; it does not snapshot arbitrary environment variables.
 - The automatic rebuild commands are fixed argument arrays for `php artisan config:cache` and `php artisan route:cache`; no shell is invoked and no user input becomes a command argument.
 - The in-app auto repair fallback uses Laravel's own `Artisan::call()` and does not expose command output.
