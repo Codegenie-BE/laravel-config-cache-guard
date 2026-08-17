@@ -78,6 +78,17 @@ jobs:
             full=true
           fi
 
+          if [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            head="$(git rev-parse HEAD)"
+            pending_tag="$(php tests/Support/detect-release.php)"
+            tag_commit="$(git rev-list --max-count=1 "${pending_tag}" 2>/dev/null || true)"
+
+            if [ -z "$tag_commit" ] || [ "$tag_commit" = "$head" ]; then
+              release=true
+              full=true
+            fi
+          fi
+
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "full=$full release=$release"
@@ -463,8 +474,12 @@ jobs:
   release:
     name: Publish pending release
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.release == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      always() &&
+      needs.ci-gate.result == 'success' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.release == 'true') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      )
     needs:
       - plan
       - ci-gate
