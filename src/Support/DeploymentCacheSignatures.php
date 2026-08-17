@@ -33,7 +33,7 @@ final class DeploymentCacheSignatures
             self::envFiles($basePath)
         );
 
-        return self::build($basePath, $files, $mode);
+        return self::build($basePath, $files, $mode, self::runtimeIdentity($basePath));
     }
 
     public static function routes(string $basePath, ?string $mode = null): ?string
@@ -59,6 +59,34 @@ final class DeploymentCacheSignatures
         $laravelPath = $basePath.'/.laravel';
 
         return is_dir($laravelPath) ? $laravelPath : $basePath.'/bootstrap';
+    }
+
+    /**
+     * Bind cached configuration to the runtime location that produced it.
+     * Laravel config values may contain absolute application or storage paths,
+     * so a cache built at another path must not be treated as portable.
+     */
+    private static function runtimeIdentity(string $basePath): string
+    {
+        $normalizedBasePath = self::normalizePath($basePath);
+        $realBasePath = realpath($basePath);
+        $normalizedRealBasePath = is_string($realBasePath)
+            ? self::normalizePath($realBasePath)
+            : $normalizedBasePath;
+        $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
+
+        return hash($algorithm, implode("\n", [
+            'os='.PHP_OS_FAMILY,
+            'base='.$normalizedBasePath,
+            'real='.$normalizedRealBasePath,
+        ]));
+    }
+
+    private static function normalizePath(string $path): string
+    {
+        $normalized = rtrim(str_replace('\\', '/', $path), '/');
+
+        return PHP_OS_FAMILY === 'Windows' ? strtolower($normalized) : $normalized;
     }
 
     /**
@@ -143,7 +171,7 @@ final class DeploymentCacheSignatures
     /**
      * @param  list<string>  $files
      */
-    private static function build(string $basePath, array $files, ?string $mode): ?string
+    private static function build(string $basePath, array $files, ?string $mode, ?string $runtimeIdentity = null): ?string
     {
         $files = array_values(array_unique(array_filter(
             $files,
@@ -156,7 +184,7 @@ final class DeploymentCacheSignatures
 
         sort($files, SORT_STRING);
 
-        $parts = [];
+        $parts = $runtimeIdentity === null ? [] : ['runtime|'.$runtimeIdentity];
         $contentMode = self::mode($mode) === 'content';
         $algorithm = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
 

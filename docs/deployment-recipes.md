@@ -4,7 +4,7 @@ Laravel Config Cache Guard is a fallback for missed or unavailable deployment ca
 
 ## Recommended deployment commands
 
-Run these after installing production dependencies and before switching traffic to the new release:
+Run these after installing production dependencies on the destination runtime and before switching traffic to the new release:
 
 ```bash
 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
@@ -13,6 +13,8 @@ php artisan route:cache
 ```
 
 Only run `route:cache` when every application route is cacheable. The guard does not make an incompatible route definition cacheable.
+
+Do not assume a Laravel config cache is portable between filesystem locations. Configuration may contain absolute application or storage paths. The guard therefore binds the config deployment signature to a hashed runtime identity derived from the current application path and OS family. If a signed config cache is moved from a build, staging or previous release path, it is rejected before Laravel can load it and the existing repair flow rebuilds it for the destination runtime. Raw filesystem paths are not stored in the signature file.
 
 ## cPanel
 
@@ -23,7 +25,7 @@ When Terminal or a deployment hook is available:
 3. Confirm that Laravel's active bootstrap cache directory is writable by the PHP web process.
 4. Run `php artisan config-cache-guard:status --strict` and resolve failures before sending traffic.
 
-When Terminal is unavailable, build the Composer vendor directory in a clean environment with a compatible PHP version, upload the release without overlaying an older vendor tree, and keep the bootstrap cache directory writable. The first web request can reject stale cache and complete in-app repair.
+When Terminal is unavailable, build the Composer vendor directory in a clean environment with a compatible PHP version, upload the release without overlaying an older vendor tree, and keep the bootstrap cache directory writable. The first web request can reject stale or runtime-mismatched config cache and complete in-app repair.
 
 ## Plesk
 
@@ -48,21 +50,25 @@ Prefer a clean release directory over extracting or uploading files on top of an
 5. Switch the document root or rename directories atomically when possible.
 6. Send one normal request, then check the safe `.pending`, `.failed` or `.succeeded` markers in the active bootstrap cache directory.
 
-The guard never exposes a public repair endpoint and never stores `.env` values in its markers.
+If the uploaded release contains config cache that was produced at another application path, the runtime-bound signature forces a one-time destination rebuild instead of allowing absolute build-machine paths to leak into production runtime behavior.
+
+The guard never exposes a public repair endpoint and never stores `.env` values or raw runtime paths in its markers.
 
 ## GitHub Actions
 
-Build and test an artifact before upload. A minimal cache stage looks like:
+Build and test the deployable artifact in CI, but prefer running Laravel cache commands on the destination after the release is installed. A destination cache stage looks like:
 
 ```yaml
 - name: Install production dependencies
   run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 
-- name: Build Laravel deployment cache
+- name: Build Laravel deployment cache on destination
   run: |
     php artisan config:cache
     php artisan route:cache
 ```
+
+If your deployment model must ship a config cache produced by CI, do not rely on that cache remaining valid after the application is relocated. Laravel Config Cache Guard binds signed config cache to the runtime path and rebuilds it after a path mismatch. This is a safety net; running `config:cache` on the destination remains the preferred production flow.
 
 Provide production environment variables through the deployment platform, not the build log. If production secrets are unavailable during artifact creation, run cache commands on the server after the new release is in place instead.
 
