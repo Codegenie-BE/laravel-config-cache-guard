@@ -69,7 +69,8 @@ it('records a successful native config cache command and clears old repair state
             ->and($currentSignature)->not->toBeNull()
             ->and(is_string($storedSignature) ? trim($storedSignature) : null)->toBe($currentSignature)
             ->and(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse()
-            ->and(is_file($cachePath.'/config-cache-refresh.failed'))->toBeFalse();
+            ->and(is_file($cachePath.'/config-cache-refresh.failed'))->toBeFalse()
+            ->and(is_file($cachePath.'/config-cache-refresh.succeeded'))->toBeTrue();
     } finally {
         removeDeploymentCacheTrackerProject($basePath);
     }
@@ -91,7 +92,8 @@ it('does not record a failed native cache command', function (): void {
             $cachePath
         ))->toBeFalse()
             ->and((string) file_get_contents($cachePath.'/config-source.signature'))->toBe('previous-signature')
-            ->and(is_file($cachePath.'/config-cache-refresh.pending'))->toBeTrue();
+            ->and(is_file($cachePath.'/config-cache-refresh.pending'))->toBeTrue()
+            ->and(is_file($cachePath.'/config-cache-refresh.succeeded'))->toBeFalse();
     } finally {
         removeDeploymentCacheTrackerProject($basePath);
     }
@@ -123,7 +125,8 @@ it('prepares the signature route cache after a successful native route cache com
             ->and(is_file($versionedPath))->toBeTrue()
             ->and((string) file_get_contents($versionedPath))->toBe($routeContents)
             ->and(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse()
-            ->and(is_file($cachePath.'/route-cache-refresh.failed'))->toBeFalse();
+            ->and(is_file($cachePath.'/route-cache-refresh.failed'))->toBeFalse()
+            ->and(is_file($cachePath.'/route-cache-refresh.succeeded'))->toBeTrue();
     } finally {
         removeDeploymentCacheTrackerProject($basePath);
     }
