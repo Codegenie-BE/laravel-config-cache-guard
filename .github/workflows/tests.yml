@@ -252,6 +252,7 @@ jobs:
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
+      COMPOSER_MAX_PARALLEL_HTTP: 4
 
     strategy:
       fail-fast: false
@@ -314,6 +315,7 @@ jobs:
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
+      COMPOSER_MAX_PARALLEL_HTTP: 4
 
     steps:
       - name: Checkout
@@ -338,6 +340,7 @@ jobs:
           --volume "${{ env.COMPOSER_CACHE_DIR }}:/composer-cache"
           --env COMPOSER_CACHE_DIR=/composer-cache
           --env COMPOSER_PROCESS_TIMEOUT=0
+          --env COMPOSER_MAX_PARALLEL_HTTP=4
           config-cache-guard-alpine:portability
           sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 --suite=smoke && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13 --suite=smoke'
 
