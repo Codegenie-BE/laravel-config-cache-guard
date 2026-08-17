@@ -12,6 +12,11 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Updated the release artifact upload action to the exact `actions/upload-artifact` v7.0.1 commit, removing the deprecated Node.js 20 action runtime from future release runs.
 - Refreshed README, contributor, security and GitHub Pages documentation for Laravel 12/13, v1.5.0 runtime-bound config signatures, current CI coverage and the supported FTP-only/shared-hosting fallback.
 - Clarified that destination-side Artisan commands are optional on FTP-only/shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
+- Record successful native `config:cache` and `route:cache` commands through Laravel's command-finished event so correctly generated deployment caches receive current guard signatures immediately instead of being rebuilt again on the first HTTP request.
+- Seed the current signature-based route-cache file after a successful native `route:cache` command when versioned route caching is enabled and no custom route cache path is configured.
+- Strengthen `config-cache-guard:status --strict` so it compares active cache signatures with the current source/runtime state and fails for stale, missing, unreadable or unavailable signatures and for a missing expected versioned route-cache file.
+- Surface major GitHub Actions upgrades for manual review instead of globally ignoring them in Dependabot, while keeping automatic merge limited to minor/patch updates; also updated `actions/attest-build-provenance` to 3.2.0.
+- Removed hardcoded package-version metadata from the GitHub Pages site so release information cannot become stale independently from Packagist and GitHub Releases.
 
 ## v1.5.0 - 2026-08-17
 
@@ -74,7 +79,7 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Skip guard execution on CLI/phpdbg by default to avoid recursive Artisan or Composer behavior.
 - Replaced the protected repair endpoint approach with an internal in-app auto repair fallback.
 - Added `CONFIG_CACHE_GUARD_AUTO_REPAIR`, enabled by default.
-- Added `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE`, disabled by default, so the package does not force config caching on projects that are not already using it.
+- Added `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE`, disabled by default, so the package does not force config caching on projects that are not already using config cache.
 - Added pending repair markers for shared hosting environments where `exec()` or a PHP CLI binary is unavailable.
 - The service provider now processes pending config and route repairs through Laravel's own `Artisan::call()` after Laravel boots uncached.
 - Removed the public `/_config-cache-guard/repair` route, controller, registration and repair-token environment options.
