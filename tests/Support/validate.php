@@ -236,7 +236,8 @@ foreach ([
     "php-version: '".$latestPhp."'",
     "composer require --dev 'orchestra/testbench:~10.0' 'pestphp/pest:~3.0'",
     'composer test:e2e -- --laravel=12',
-    'git checkout -- composer.json composer.lock',
+    'git checkout -- composer.json',
+    "php -r \"if (is_file('composer.lock')) { unlink('composer.lock'); }\"",
     "composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0'",
     'composer test:e2e -- --laravel=13',
 ] as $requirement) {
@@ -261,6 +262,8 @@ if (! is_array($alpinePlatform)) {
         '--build-arg PHP_VERSION='.$latestPhp,
         '--file '.$alpinePlatform['dockerfile'],
         'composer test:e2e -- --laravel=12',
+        'git checkout -- composer.json',
+        'rm -f composer.lock',
         'composer test:e2e -- --laravel=13',
     ] as $requirement) {
         if (! str_contains($jobs['alpine-portability'], $requirement)) {
