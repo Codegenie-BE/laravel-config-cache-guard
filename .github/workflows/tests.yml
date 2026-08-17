@@ -220,7 +220,9 @@ jobs:
           composer test:e2e -- --laravel=12
 
       - name: Reset dependency manifests
-        run: git checkout -- composer.json composer.lock
+        run: |
+          git checkout -- composer.json
+          php -r "if (is_file('composer.lock')) { unlink('composer.lock'); }"
 
       - name: Test Laravel 13 on the same runner
         run: |
@@ -262,7 +264,7 @@ jobs:
           --env COMPOSER_CACHE_DIR=/composer-cache
           --env COMPOSER_PROCESS_TIMEOUT=0
           config-cache-guard-alpine:portability
-          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 && git checkout -- composer.json composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13'
+          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13'
 
   minimum-dependencies:
     name: Minimum dependencies / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
