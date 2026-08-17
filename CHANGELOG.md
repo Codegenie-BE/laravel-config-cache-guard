@@ -4,6 +4,9 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+- Reduced CI fan-out by keeping the complete PHP/Laravel compatibility matrix on Linux x64 while reusing one PHP 8.5 runner per Windows x64, macOS ARM64, Linux ARM64 and Alpine environment to test both Laravel 12 and 13, with representative minimum-runtime E2E coverage retained on Linux.
+- Clarified that destination-side Artisan commands are optional on FTP-only/shared hosting and documented `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` for hosts that need the in-app fallback to create a missing config cache without SSH or deployment hooks.
+
 ## v1.5.0 - 2026-08-17
 
 - Bound config deployment signatures to a hashed runtime identity derived from the normalized application base path, canonical base path and OS family, so config cache built or signed at another runtime path is rejected before Laravel can load absolute paths from the wrong environment.
