@@ -252,6 +252,7 @@ jobs:
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
+      COMPOSER_MAX_PARALLEL_HTTP: 4
 
     strategy:
       fail-fast: false
@@ -286,21 +287,24 @@ jobs:
             portability-${{ matrix.platform.runner }}-
 
       - name: Test Laravel 12 on the existing runner
+        shell: bash
         run: |
           composer require --dev 'orchestra/testbench:~10.0' 'pestphp/pest:~3.0' --no-update --no-interaction
-          composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+          sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
           composer test
           composer test:e2e -- --laravel=12 --suite=smoke
 
       - name: Reset dependency manifests
+        shell: bash
         run: |
           git checkout -- composer.json
           php -r "if (is_file('composer.lock')) { unlink('composer.lock'); }"
 
       - name: Test Laravel 13 on the same runner
+        shell: bash
         run: |
           composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
-          composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+          sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
           composer test
           composer test:e2e -- --laravel=13 --suite=smoke
 
@@ -314,6 +318,7 @@ jobs:
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
       COMPOSER_PROCESS_TIMEOUT: 0
+      COMPOSER_MAX_PARALLEL_HTTP: 4
 
     steps:
       - name: Checkout
@@ -338,8 +343,9 @@ jobs:
           --volume "${{ env.COMPOSER_CACHE_DIR }}:/composer-cache"
           --env COMPOSER_CACHE_DIR=/composer-cache
           --env COMPOSER_PROCESS_TIMEOUT=0
+          --env COMPOSER_MAX_PARALLEL_HTTP=4
           config-cache-guard-alpine:portability
-          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 --suite=smoke && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13 --suite=smoke'
+          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 --suite=smoke && git checkout -- composer.json && rm -f composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13 --suite=smoke'
 
   minimum-dependencies:
     name: Minimum dependencies / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}

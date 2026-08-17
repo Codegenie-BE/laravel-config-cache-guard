@@ -10,13 +10,18 @@ Run these after installing production dependencies on the destination runtime an
 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 php artisan config:cache
 php artisan route:cache
+php artisan config-cache-guard:status --strict
 ```
 
 Only run `route:cache` when every application route is cacheable. The guard does not make an incompatible route definition cacheable.
 
+Successful native `config:cache` and `route:cache` commands are tracked by the package after Laravel reports a successful command exit. The config deployment signature is stored immediately, and the default route flow also prepares the current signature-based route-cache copy. `config-cache-guard:status --strict` therefore validates the cache state produced by the deployment before traffic needs to hit the application.
+
 These commands are the preferred deployment path, not a requirement of the package. On shared hosting where you cannot execute Artisan on the destination, use the shared-hosting flow below instead.
 
 Do not assume a Laravel config cache is portable between filesystem locations. Configuration may contain absolute application or storage paths. The guard therefore binds the config deployment signature to a hashed runtime identity derived from the current application path and OS family. If a signed config cache is moved from a build, staging or previous release path, it is rejected before Laravel can load it and the existing repair flow rebuilds it for the destination runtime. Raw filesystem paths are not stored in the signature file.
+
+Strict status checks compare the stored deployment signatures with freshly calculated signatures. Existing-but-stale, missing or unreadable signature state fails `--strict`; route cache also fails strict validation when the signature-based cache file currently expected by the guard is missing.
 
 ## cPanel
 
@@ -48,7 +53,7 @@ If Plesk runs a different PHP CLI version than the website, set the full support
 CONFIG_CACHE_GUARD_PHP_BINARY=/opt/plesk/php/8.4/bin/php
 ```
 
-Run `config-cache-guard:status --strict` with that same binary to verify the result.
+Run `config-cache-guard:status --strict` with that same binary to verify the result. The command now validates deployment-signature freshness as well as filesystem/process health, so a zero exit code can be used as the final cache gate in the Plesk deployment task.
 
 If your Plesk plan does not expose Terminal or post-deployment commands, use the same shared-hosting fallback as cPanel instead of generating config cache on another machine and assuming it is portable.
 
@@ -80,11 +85,14 @@ A destination cache stage is appropriate only when the deployment target actuall
 - name: Install production dependencies
   run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 
-- name: Build Laravel deployment cache on destination
+- name: Build and verify Laravel deployment cache on destination
   run: |
     php artisan config:cache
     php artisan route:cache
+    php artisan config-cache-guard:status --strict
 ```
+
+The successful native cache commands synchronize guard signatures before the strict health check runs. The strict command fails when the resulting active cache is not proven current, so the deployment can stop before switching traffic.
 
 For FTP-only/shared hosting, build dependencies and assets in CI, then rely on the package's runtime validation and in-app fallback on production. If config cache is absent and should be created automatically, set `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` as a real server environment value.
 

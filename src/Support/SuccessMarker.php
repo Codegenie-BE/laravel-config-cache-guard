@@ -17,10 +17,10 @@ final class SuccessMarker
             'Codegenie Laravel Config Cache Guard success',
             'generated_at='.gmdate('c'),
             'target='.$target,
-            'cache_file='.$cacheFile,
+            'cache_file_hash='.self::cacheFileHash($cacheFile),
             $sourceSignature === null ? null : 'source_signature='.$sourceSignature,
             'cleaned_stale_files='.$cleanedStaleFiles,
-            'note=No .env values, secrets, tokens or command output are stored in this file.',
+            'note=No .env values, raw runtime paths, secrets, tokens or command output are stored in this file.',
             '',
         ], static fn (?string $line): bool => $line !== null));
 
@@ -35,9 +35,15 @@ final class SuccessMarker
             return null;
         }
 
+        $cacheFileHash = $fields['cache_file_hash'] ?? null;
+
+        if ($cacheFileHash === null && isset($fields['cache_file'])) {
+            $cacheFileHash = self::cacheFileHash($fields['cache_file']);
+        }
+
         $parts = array_filter([
             $fields['generated_at'] ?? null,
-            isset($fields['cache_file']) ? 'cache: '.$fields['cache_file'] : null,
+            $cacheFileHash === null ? null : 'cache id: '.substr($cacheFileHash, 0, 12),
         ]);
 
         return implode(' - ', $parts) ?: 'present';
@@ -84,5 +90,10 @@ final class SuccessMarker
         }
 
         return $fields;
+    }
+
+    private static function cacheFileHash(string $path): string
+    {
+        return hash('sha256', str_replace('\\', '/', $path));
     }
 }

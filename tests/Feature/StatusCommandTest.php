@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Codegenie\ConfigCacheGuard\Support\ConfigCacheFile;
+use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
 use Codegenie\ConfigCacheGuard\Support\SuccessMarker;
 
 it('can run the status command', function (): void {
@@ -105,6 +107,131 @@ it('returns a failure in strict mode while repair state remains and clears it ex
 
         if ($createdCachePath) {
             @rmdir($cachePath);
+        }
+    }
+});
+
+it('rejects a stale config deployment signature in strict mode', function (): void {
+    $cachePath = app()->bootstrapPath('cache');
+    $configCachePath = ConfigCacheFile::current(base_path(), $cachePath);
+    $signaturePath = $cachePath.'/config-source.signature';
+    $hadCache = is_file($configCachePath);
+    $originalCache = $hadCache ? @file_get_contents($configCachePath) : null;
+    $hadSignature = is_file($signaturePath);
+    $originalSignature = $hadSignature ? @file_get_contents($signaturePath) : null;
+
+    try {
+        file_put_contents($configCachePath, "<?php return ['app' => ['name' => 'Codegenie']];\n");
+        file_put_contents($signaturePath, str_repeat('0', 64));
+
+        $this->artisan('config-cache-guard:status --strict')
+            ->expectsOutputToContain('config signature state')
+            ->expectsOutputToContain('stale')
+            ->assertExitCode(1);
+    } finally {
+        if ($hadCache && is_string($originalCache)) {
+            file_put_contents($configCachePath, $originalCache);
+        } else {
+            @unlink($configCachePath);
+        }
+
+        if ($hadSignature && is_string($originalSignature)) {
+            file_put_contents($signaturePath, $originalSignature);
+        } else {
+            @unlink($signaturePath);
+        }
+    }
+});
+
+it('accepts a current config deployment signature in strict mode', function (): void {
+    $cachePath = app()->bootstrapPath('cache');
+    $configCachePath = ConfigCacheFile::current(base_path(), $cachePath);
+    $signaturePath = $cachePath.'/config-source.signature';
+    $hadCache = is_file($configCachePath);
+    $originalCache = $hadCache ? @file_get_contents($configCachePath) : null;
+    $hadSignature = is_file($signaturePath);
+    $originalSignature = $hadSignature ? @file_get_contents($signaturePath) : null;
+
+    try {
+        file_put_contents($configCachePath, "<?php return ['app' => ['name' => 'Codegenie']];\n");
+        $signature = DeploymentCacheSignatures::config(base_path());
+
+        expect($signature)->not->toBeNull();
+        file_put_contents($signaturePath, (string) $signature);
+
+        $this->artisan('config-cache-guard:status --strict')
+            ->expectsOutputToContain('config signature state')
+            ->expectsOutputToContain('current')
+            ->assertExitCode(0);
+    } finally {
+        if ($hadCache && is_string($originalCache)) {
+            file_put_contents($configCachePath, $originalCache);
+        } else {
+            @unlink($configCachePath);
+        }
+
+        if ($hadSignature && is_string($originalSignature)) {
+            file_put_contents($signaturePath, $originalSignature);
+        } else {
+            @unlink($signaturePath);
+        }
+    }
+});
+
+it('requires the current signature route cache path in strict mode', function (): void {
+    $cachePath = app()->bootstrapPath('cache');
+    $routeCachePath = $cachePath.'/routes-v7.php';
+    $signaturePath = $cachePath.'/route-source.signature';
+    $hadRouteCache = is_file($routeCachePath);
+    $originalRouteCache = $hadRouteCache ? @file_get_contents($routeCachePath) : null;
+    $hadSignature = is_file($signaturePath);
+    $originalSignature = $hadSignature ? @file_get_contents($signaturePath) : null;
+    $versionedPath = null;
+    $hadVersionedCache = false;
+    $originalVersionedCache = null;
+
+    try {
+        $routeContents = "<?php return ['compiled' => true];\n";
+        file_put_contents($routeCachePath, $routeContents);
+        $signature = DeploymentCacheSignatures::routes(base_path());
+
+        expect($signature)->not->toBeNull();
+        file_put_contents($signaturePath, (string) $signature);
+        $versionedPath = $cachePath.'/routes-'.$signature.'.php';
+        $hadVersionedCache = is_file($versionedPath);
+        $originalVersionedCache = $hadVersionedCache ? @file_get_contents($versionedPath) : null;
+        @unlink($versionedPath);
+
+        $this->artisan('config-cache-guard:status --strict')
+            ->expectsOutputToContain('route signature state')
+            ->expectsOutputToContain('missing current cache')
+            ->assertExitCode(1);
+
+        file_put_contents($versionedPath, $routeContents);
+
+        $this->artisan('config-cache-guard:status --strict')
+            ->expectsOutputToContain('route signature state')
+            ->expectsOutputToContain('current')
+            ->assertExitCode(0);
+    } finally {
+        if ($hadRouteCache && is_string($originalRouteCache)) {
+            file_put_contents($routeCachePath, $originalRouteCache);
+        } else {
+            @unlink($routeCachePath);
+        }
+
+        if ($hadSignature && is_string($originalSignature)) {
+            file_put_contents($signaturePath, $originalSignature);
+        } else {
+            @unlink($signaturePath);
+        }
+
+        if (is_string($versionedPath)) {
+            if ($hadVersionedCache && is_string($originalVersionedCache)) {
+                file_put_contents($versionedPath, $originalVersionedCache);
+            } else {
+                @unlink($versionedPath);
+            }
         }
     }
 });

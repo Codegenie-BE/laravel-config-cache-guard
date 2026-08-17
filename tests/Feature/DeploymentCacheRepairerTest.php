@@ -197,13 +197,18 @@ it('repairs pending config cache into a configured custom cache file', function 
 
         DeploymentCacheRepairer::runPending($basePath, $cachePath, $callable);
 
+        $successMarker = (string) file_get_contents($cachePath.'/config-cache-refresh.succeeded');
+        $normalizedCustomConfigPath = str_replace('\\', '/', $customConfigPath);
+        $expectedCacheFileHash = hash('sha256', $normalizedCustomConfigPath);
+
         expect($calls)->toBe(['config:cache']);
         expect(is_file($customConfigPath))->toBeTrue();
         expect(is_file($cachePath.'/config.php'))->toBeFalse();
         expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
         expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
-        expect(normalizeTestPath((string) file_get_contents($cachePath.'/config-cache-refresh.succeeded')))
-            ->toContain('cache_file='.normalizeTestPath($customConfigPath));
+        expect($successMarker)->toContain('cache_file_hash='.$expectedCacheFileHash);
+        expect(str_contains($successMarker, $customConfigPath))->toBeFalse();
+        expect(str_contains($successMarker, $normalizedCustomConfigPath))->toBeFalse();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }

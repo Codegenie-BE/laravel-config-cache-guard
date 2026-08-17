@@ -23,9 +23,10 @@ final class StatusConfigCacheGuardCommand extends Command
 
     public function handle(): int
     {
+        $basePath = base_path();
         $indexPath = public_path('index.php');
         $cachePath = app()->bootstrapPath('cache');
-        $cachedConfigPath = ConfigCacheFile::current(base_path(), $cachePath);
+        $cachedConfigPath = ConfigCacheFile::current($basePath, $cachePath);
         $configSignaturePath = $cachePath.'/config-source.signature';
         $configFailedPath = $cachePath.'/config-cache-refresh.failed';
         $configPendingPath = $cachePath.'/config-cache-refresh.pending';
@@ -61,13 +62,36 @@ final class StatusConfigCacheGuardCommand extends Command
         $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
         $createConfigWhenMissing = Environment::flag('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
-        $currentRouteCachePath = $this->effectiveRouteCachePath($cachePath, $routeGuardEnabled);
+        $configCacheExists = is_file($cachedConfigPath);
+        $routeCacheExists = $routeCachePaths !== [];
+        $currentConfigSignature = $configGuardEnabled && $configCacheExists
+            ? DeploymentCacheSignatures::config($basePath)
+            : null;
+        $currentRouteSignature = $routeGuardEnabled && $routeCacheExists
+            ? DeploymentCacheSignatures::routes($basePath)
+            : null;
+        $currentRouteCachePath = $this->effectiveRouteCachePath(
+            $cachePath,
+            $routeGuardEnabled,
+            $currentRouteSignature
+        );
+        $configSignatureState = $configGuardEnabled
+            ? $this->signatureState($configSignaturePath, $currentConfigSignature, $configCacheExists)
+            : 'disabled';
+        $routeSignatureState = $routeGuardEnabled
+            ? $this->routeSignatureState(
+                $routeSignaturePath,
+                $currentRouteSignature,
+                $routeCacheExists,
+                is_file($currentRouteCachePath)
+            )
+            : 'disabled';
         $processControlAvailable = BoundedProcess::isAvailable();
         $phpBinary = $this->resolvePhpBinary();
         $cacheWritable = is_writable($cachePath);
         $customConfigCachePath = $this->normalizePath($cachedConfigPath)
             !== $this->normalizePath($cachePath.'/config.php');
-        $configCacheWritable = is_file($cachedConfigPath)
+        $configCacheWritable = $configCacheExists
             ? is_writable($cachedConfigPath)
             : is_writable(dirname($cachedConfigPath));
 
@@ -90,15 +114,17 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Current config cache path', $cachedConfigPath],
             ['Custom config cache path', $customConfigCachePath ? 'yes' : 'no'],
             ['Config cache path writable', $configCacheWritable ? 'yes' : 'no'],
-            ['Cached config exists', is_file($cachedConfigPath) ? 'yes' : 'no'],
+            ['Cached config exists', $configCacheExists ? 'yes' : 'no'],
             ['config signature exists', is_file($configSignaturePath) ? 'yes' : 'no'],
+            ['config signature state', $configSignatureState],
             ['config pending repair', FailureMarker::summary($configPendingPath) ?? 'no'],
             ['config failed marker', FailureMarker::summary($configFailedPath) ?? 'no'],
             ['config last successful repair', SuccessMarker::summary($configSucceededPath) ?? 'no'],
-            ['cached routes exist', $routeCachePaths === [] ? 'no' : 'yes ('.count($routeCachePaths).')'],
+            ['cached routes exist', $routeCacheExists ? 'yes ('.count($routeCachePaths).')' : 'no'],
             ['current route cache path', $currentRouteCachePath],
             ['current route cache exists', is_file($currentRouteCachePath) ? 'yes' : 'no'],
             ['route signature exists', is_file($routeSignaturePath) ? 'yes' : 'no'],
+            ['route signature state', $routeSignatureState],
             ['route pending repair', FailureMarker::summary($routePendingPath) ?? 'no'],
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
             ['route last successful repair', SuccessMarker::summary($routeSucceededPath) ?? 'no'],
@@ -119,7 +145,7 @@ final class StatusConfigCacheGuardCommand extends Command
             return $this->statusCode(false);
         }
 
-        if ($configGuardEnabled && (is_file($cachedConfigPath) || $createConfigWhenMissing) && ! $configCacheWritable) {
+        if ($configGuardEnabled && ($configCacheExists || $createConfigWhenMissing) && ! $configCacheWritable) {
             $this->error('Result: installed, but the configured config cache path is not writable. Stale config cannot be replaced safely.');
 
             return $this->statusCode(false);
@@ -147,6 +173,25 @@ final class StatusConfigCacheGuardCommand extends Command
             || is_file($routePendingPath)
         ) {
             $this->warn('Result: repair state is still pending or failed. Resolve it or use --clear-failures after correcting the cause.');
+
+            return $this->statusCode(false);
+        }
+
+        $unsafeSignatureStates = [];
+
+        if ($configGuardEnabled && $configCacheExists && $configSignatureState !== 'current') {
+            $unsafeSignatureStates[] = 'config: '.$configSignatureState;
+        }
+
+        if ($routeGuardEnabled && $routeCacheExists && $routeSignatureState !== 'current') {
+            $unsafeSignatureStates[] = 'route: '.$routeSignatureState;
+        }
+
+        if ($unsafeSignatureStates !== []) {
+            $this->warn(
+                'Result: deployment cache state is not current ('.implode(', ', $unsafeSignatureStates).'). '
+                .'The next guarded HTTP request will reject, bypass or rebuild that cache. Rebuild the affected cache or let the guard repair it before relying on this health check.'
+            );
 
             return $this->statusCode(false);
         }
@@ -255,23 +300,67 @@ final class StatusConfigCacheGuardCommand extends Command
         return RouteCacheFiles::all($cachePath);
     }
 
-    private function effectiveRouteCachePath(string $cachePath, bool $routeGuardEnabled): string
-    {
+    private function effectiveRouteCachePath(
+        string $cachePath,
+        bool $routeGuardEnabled,
+        ?string $routeSignature
+    ): string {
         if (
             ! $routeGuardEnabled
             || Environment::string('APP_ROUTES_CACHE') !== null
             || ! Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
+            || $routeSignature === null
         ) {
             return RouteCacheFiles::current($cachePath);
         }
 
-        $signature = DeploymentCacheSignatures::routes(base_path());
+        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$routeSignature.'.php';
+    }
 
-        if ($signature === null) {
-            return RouteCacheFiles::current($cachePath);
+    private function signatureState(string $path, ?string $currentSignature, bool $cacheExists): string
+    {
+        if (! $cacheExists) {
+            return 'not applicable';
         }
 
-        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
+        if ($currentSignature === null) {
+            return 'unavailable';
+        }
+
+        if (! is_file($path)) {
+            return 'missing';
+        }
+
+        $storedSignature = @file_get_contents($path);
+
+        if (! is_string($storedSignature)) {
+            return 'unreadable';
+        }
+
+        $storedSignature = trim($storedSignature);
+
+        if ($storedSignature === '') {
+            return 'missing';
+        }
+
+        return hash_equals($currentSignature, $storedSignature) ? 'current' : 'stale';
+    }
+
+    private function routeSignatureState(
+        string $path,
+        ?string $currentSignature,
+        bool $routeCacheExists,
+        bool $currentRouteCacheExists
+    ): string {
+        if (! $routeCacheExists) {
+            return 'not applicable';
+        }
+
+        if (! $currentRouteCacheExists) {
+            return 'missing current cache';
+        }
+
+        return $this->signatureState($path, $currentSignature, true);
     }
 
     private function normalizePath(string $path): string
