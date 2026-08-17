@@ -7,6 +7,9 @@ namespace Codegenie\ConfigCacheGuard;
 use Codegenie\ConfigCacheGuard\Console\InstallConfigCacheGuardCommand;
 use Codegenie\ConfigCacheGuard\Console\StatusConfigCacheGuardCommand;
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheRepairer;
+use Codegenie\ConfigCacheGuard\Support\DeploymentCacheTracker;
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\ServiceProvider;
 
 final class ConfigCacheGuardServiceProvider extends ServiceProvider
@@ -18,6 +21,18 @@ final class ConfigCacheGuardServiceProvider extends ServiceProvider
                 InstallConfigCacheGuardCommand::class,
                 StatusConfigCacheGuardCommand::class,
             ]);
+
+            $app = $this->app;
+            $events = $app->make(Dispatcher::class);
+
+            $events->listen(CommandFinished::class, static function (CommandFinished $event) use ($app): void {
+                DeploymentCacheTracker::recordSuccessfulCommand(
+                    $event->command,
+                    $event->exitCode,
+                    $app->basePath(),
+                    $app->bootstrapPath('cache')
+                );
+            });
 
             return;
         }
