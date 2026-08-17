@@ -51,9 +51,9 @@ By default, the package does **not** create config cache when none exists and do
 
 ![Terminal demonstration of Laravel Config Cache Guard rejecting stale deployment cache and completing deferred repair](https://raw.githubusercontent.com/Codegenie-BE/laravel-config-cache-guard/main/docs/assets/demo.gif)
 
-The animation is a concise transcript of the real Laravel 13, process-control-disabled scenario covered by the package E2E suite. Read the [accessible transcript and verification notes](docs/demo-transcript.md).
+The animation is a concise transcript of the real Laravel 13, process-control-disabled scenario covered by the full package E2E suite. Read the [accessible transcript and verification notes](docs/demo-transcript.md).
 
-> This package is a safety net. The best production flow is still to rebuild Laravel deployment caches during deployment.
+> This package is a safety net. When your host exposes reliable destination-side deployment commands, rebuilding Laravel deployment caches there remains the preferred production flow. FTP-only/shared hosting without command access is explicitly supported through the in-app fallback.
 
 ## Why this exists
 
@@ -71,13 +71,15 @@ bootstrap/cache/routes-v7.php
 
 Those caches are good for production performance, but relevant deployment changes are not reflected until the appropriate cache is rebuilt. This includes changes to `.env`, configuration, routes, application providers, bootstrap registration and installed dependency metadata.
 
-This is easy to forget on shared hosting, FTP deployments or hosting panels where deploy hooks are limited. This package checks whether source metadata changed before Laravel bootstraps. If it changed, it prevents Laravel from using stale deployment cache and tries to rebuild safely.
+Config cache also is not necessarily portable between filesystem locations. Laravel configuration can contain absolute application or storage paths, so a cache generated in CI, on a developer machine, on staging or in a previous release directory can be unsafe after relocation even when the source files themselves are unchanged.
+
+This is easy to miss on shared hosting, FTP deployments or hosting panels where deploy hooks are limited. The package checks source state before Laravel bootstraps and binds config signatures to the current runtime identity. If source state or the config runtime identity changed, it prevents Laravel from using stale deployment cache and tries to rebuild safely.
 
 When bounded process control is unavailable, the package removes stale config cache, points Laravel at a current signature-based route cache path, and queues an internal in-app auto repair. After the current HTTP response is sent, the package can rebuild through Laravel's own `Artisan::call()` without SSH, tokens or public repair URLs.
 
 ## What it does
 
-On normal HTTP requests, the guard performs small metadata checks against:
+On normal HTTP requests, the guard checks relevant deployment sources against:
 
 - `.env`
 - `.env.{APP_ENV}` when `APP_ENV` is provided as a real server environment variable
@@ -87,7 +89,9 @@ On normal HTTP requests, the guard performs small metadata checks against:
 - the active bootstrap `app.php` and `providers.php` files (`bootstrap/*` or `.laravel/*`) when they exist
 - `composer.json` and `composer.lock` when present, so dependency or package-discovery changes invalidate deployment caches
 
-It only checks file metadata such as timestamps, file size and inode metadata. It does not read or store secret values.
+The default `metadata` signature mode uses fast metadata such as timestamps, file size and inode metadata. Optional `content` mode hashes source-file bytes in memory to catch same-size rewrites that preserve metadata. Neither mode stores source contents or `.env` values.
+
+Config signatures additionally include a one-way runtime identity derived from the normalized application base path, canonical base path and OS family. This means a signed config cache moved to another application path or operating system is rejected even when its source files are otherwise identical. Raw runtime filesystem paths are not persisted in the signature file. Route signatures remain source-based because route cache does not need the same config-path portability protection.
 
 By default, config cache guarding refreshes the existing config cache in Laravel's active bootstrap cache directory. It also supports an explicit `APP_CONFIG_CACHE` path when that path is available as a real process or server environment variable before Composer loads. It does not force config caching on projects that are not using config cache. You can opt into creating config cache when missing with `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
 
@@ -107,7 +111,8 @@ If pre-bootstrap rebuilding cannot run because bounded PHP process control or a 
 
 ## What it does not do
 
-- It does not read, log or store `.env` values.
+- It does not parse, log or store `.env` values. Content-signature mode may hash `.env` file bytes in memory without persisting the values.
+- It does not persist raw runtime filesystem paths in deployment signatures.
 - It does not use Redis, queues, workers, cron or a database.
 - It does not require you to manually register middleware.
 - It does not expose an unauthenticated public repair endpoint.
@@ -140,8 +145,9 @@ HTTP request
   -> Laravel requires vendor/autoload.php
   -> Composer autoloads the pre-bootstrap guard
   -> guard checks config and route source signatures
+  -> config signature also checks the one-way runtime identity
   -> unchanged: continue immediately
-  -> changed config: remove stale config cache before Laravel can use it
+  -> changed or relocated config: remove stale config cache before Laravel can use it
   -> changed routes: point Laravel at a current signature-based route cache path
   -> proc_open/PHP CLI available: run a bounded config:cache or route:cache process before Laravel boots
   -> bounded process control/PHP CLI unavailable: write pending repair marker
@@ -252,7 +258,7 @@ When bounded process control is unavailable, the in-app auto repair fallback can
 
 PHP 8.2 is security fixes only until December 31, 2026. For new production projects, prefer PHP 8.4 or PHP 8.5 when your hosting supports it.
 
-As of August 13, 2026, the non-EOL runtime matrix is PHP 8.2, 8.3, 8.4 and 8.5 with Laravel 12, plus PHP 8.3, 8.4 and 8.5 with Laravel 13. Laravel 13/PHP 8.2 is deliberately absent because Laravel 13 officially requires PHP 8.3 or newer. Security-only support still counts as supported; a version is removed when its official security support ends. `composer check:support` validates the Composer constraints, dependency pins, platform definitions and package and E2E matrices against `tests/Support/policy.php`, and deliberately fails once a configured branch reaches EOL or any supported platform/runtime entry disappears.
+As of August 17, 2026, the non-EOL runtime matrix is PHP 8.2, 8.3, 8.4 and 8.5 with Laravel 12, plus PHP 8.3, 8.4 and 8.5 with Laravel 13. Laravel 13/PHP 8.2 is deliberately absent because Laravel 13 officially requires PHP 8.3 or newer. Security-only support still counts as supported; a version is removed when its official security support ends. `composer check:support` validates the Composer constraints, dependency pins, platform definitions and compatibility/E2E matrices against `tests/Support/policy.php`, and deliberately fails once a configured branch reaches EOL or any supported platform/runtime entry disappears.
 
 Useful references:
 
@@ -314,7 +320,9 @@ This package handles that without a public endpoint:
 7. the next request uses the refreshed cache file
 ```
 
-If the in-app repair fails, a safe `.failed` marker is written in the active Laravel bootstrap cache directory. It contains a reason and suggested action, but no `.env` values, secrets, tokens or command output.
+If no config cache exists at all and you intentionally want the package to create one without SSH or a deployment hook, set `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true` as a real server environment value. Otherwise the application continues without config cache until another valid deployment mechanism creates it.
+
+If the in-app repair fails, a safe `.failed` marker is written in the active Laravel bootstrap cache directory. It contains a reason and suggested action, but no `.env` values, raw runtime paths, secrets, tokens or command output.
 
 ## Files written by the guard
 
@@ -323,13 +331,13 @@ The guard may create or update these files inside Laravel's active bootstrap cac
 | File | Purpose |
 | --- | --- |
 | `config.php` | Laravel's cached configuration, created by `php artisan config:cache`. |
-| `config-source.signature` | Metadata signature of environment, config, provider, bootstrap and dependency source files. |
+| `config-source.signature` | One-way deployment signature of environment, config, provider, bootstrap and dependency sources plus the config runtime identity. Raw runtime paths are not stored. |
 | `config-cache-refresh.lock` | File lock to avoid concurrent config cache rebuilds. |
-| `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap source signature. |
+| `config-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap config signature. |
 | `config-cache-refresh.failed` | Safe diagnostic marker after a failed config rebuild attempt. |
 | `config-cache-refresh.succeeded` | Safe diagnostic marker after a successful config rebuild. |
 | `routes-*.php` | Laravel's cached routes, created by `php artisan route:cache`. |
-| `route-source.signature` | Metadata signature of route, config, provider, bootstrap, environment and dependency source files. |
+| `route-source.signature` | Source signature of route, config, provider, bootstrap, environment and dependency files. |
 | `route-cache-refresh.lock` | File lock to avoid concurrent route cache rebuilds. |
 | `route-cache-refresh.pending` | Internal marker used by the in-app auto repair fallback, including the exact pre-bootstrap source signature. |
 | `route-cache-refresh.failed` | Safe diagnostic marker after a failed route rebuild attempt. |
@@ -339,15 +347,15 @@ The guard may create or update these files inside Laravel's active bootstrap cac
 
 | Situation | Behavior |
 | --- | --- |
-| No relevant source change | Continue immediately. |
+| No relevant source or config-runtime change | Continue immediately. |
 | No config cache exists and `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=false` | Do nothing for config cache. |
-| Config changed and pre-bootstrap rebuild succeeds | Continue with refreshed cached config. |
+| Config changed or its runtime identity changed and pre-bootstrap rebuild succeeds | Continue with refreshed cached config. |
 | Routes changed and pre-bootstrap rebuild succeeds | Continue with refreshed cached routes in the current signature-based route cache file. |
 | Config rebuild needs bounded process control but it is unavailable | Remove stale cached config and write a pending auto repair marker. |
 | Route rebuild needs bounded process control but it is unavailable | Point Laravel at the current signature-based route cache path, keep older bypassed route cache files for cleanup, and write a pending auto repair marker. If a signature-based bypass is not possible, remove the stale route cache file so the current request loads route source files. |
 | PHP CLI is not found | Use the same pending auto repair fallback behavior for the affected cache target. |
 | Pre-bootstrap rebuild fails | Use the same pending auto repair fallback behavior for the affected cache target. |
-| In-app auto repair succeeds | Rebuild through Laravel without external process control after the current response is sent, atomically persist and verify the exact pre-bootstrap source signature, then remove pending markers. |
+| In-app auto repair succeeds | Rebuild through Laravel without external process control after the current response is sent, atomically persist and verify the exact pre-bootstrap signature, then remove pending markers. |
 | In-app auto repair fails | Remove stale cache file and write a safe failed marker. |
 | A rebuilt cache signature cannot be stored | Do not retain an untracked cache file. Remove or bypass it safely, write a pending or failed marker, and retry after the configured recovery path. |
 | A stale cache file cannot be removed | Stop the request with a safe 503 response instead of allowing Laravel to load known-stale cache. This safety stop applies even when normal fail-hard mode is disabled. |
@@ -393,9 +401,9 @@ If bounded process control is disabled, the first request points Laravel at a si
 
 ## Recommended production flow
 
-Use this package as a fallback, not as your primary deployment strategy.
+Use this package as a fallback, not as your primary deployment strategy when destination deployment commands are available.
 
-A solid deployment should still include:
+A deployment target that exposes a reliable command runner should still include:
 
 ```bash
 php artisan config:cache
@@ -404,7 +412,7 @@ php artisan route:cache
 
 Only run `php artisan route:cache` in deployments when your application supports Laravel route caching.
 
-This package protects you when those steps are forgotten, skipped or not available on shared hosting.
+On FTP-only/shared hosting where SSH, Terminal or deployment hooks are not available, destination-side Artisan is not a package requirement. Keep the active Laravel cache directory writable and use the documented in-app fallback. See [Deployment recipes](docs/deployment-recipes.md).
 
 ## Known limitations
 
@@ -412,13 +420,13 @@ This package protects you when those steps are forgotten, skipped or not availab
 - Lock acquisition is bounded by `CONFIG_CACHE_GUARD_LOCK_TIMEOUT`, so concurrent or abandoned rebuilds cannot hold a request indefinitely.
 - In-app auto repair works without external process control, but it runs after the current HTTP response is sent. The current request runs without stale deployment cache first.
 - `CONFIG_CACHE_GUARD_FAIL_HARD=true` intentionally stops the request with a safe 503 page, so in-app auto repair cannot run during that same request.
-- Change detection uses fast metadata signatures by default. Filesystems or deployment tools that preserve timestamps, size and inode metadata for a same-size in-place rewrite can evade that mode. Set `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content` at process or web-server level to hash source contents, including `.env` files, without storing their values. Content mode performs more file I/O on every guarded request; a normal deployment cache rebuild remains the primary release mechanism.
+- Change detection uses fast metadata signatures by default. Filesystems or deployment tools that preserve timestamps, size and inode metadata for a same-size in-place rewrite can evade that mode. Set `CONFIG_CACHE_GUARD_SIGNATURE_MODE=content` at process or web-server level to hash source contents, including `.env` files, without storing their values. Content mode performs more file I/O on every guarded request; a normal deployment cache rebuild remains the primary release mechanism when deployment commands are available.
 - Config cache creation when missing is opt-in through `CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE=true`.
 - Route cache guarding only activates automatically when a `routes-*.php` file already exists in Laravel's active bootstrap cache directory.
 - Pre-bootstrap cache path detection supports Laravel's standard `bootstrap` directory and Laravel 13's `.laravel` directory. Arbitrary bootstrap paths selected later through application code cannot be discovered before `bootstrap/app.php` runs.
 - A custom `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE` or guard override placed only in `.env` is unavailable to the Composer-loaded pre-bootstrap guard. Configure these overrides at process or web-server level. The deferred layer intentionally keeps using the earlier external-environment snapshot for consistency.
 - The package does not clear application cache, view cache, event cache, OPcache or Redis.
-- This package is a fallback safety net. It should not replace a correct deployment pipeline that runs Laravel's deployment cache commands.
+- This package is a fallback safety net. It should not replace a correct deployment pipeline when one is available.
 
 ## Troubleshooting
 
@@ -518,14 +526,14 @@ CONFIG_CACHE_GUARD_ENABLED=false
 
 ## Development and quality checks
 
-Install the development dependencies and run the complete quality gate with one cross-platform Composer command:
+Install the development dependencies and run the complete local gate with:
 
 ```bash
 composer install
-composer check
+composer check:all
 ```
 
-`composer check` validates that no configured PHP or Laravel branch is EOL, runs strict Composer validation, builds and inspects the package distribution archive, then runs the security audit, optimized strict-PSR autoload generation, Pint, PHPStan and Pest in a fixed order. The archive check rejects leaked development files, documentation, tests or vendor dependencies and verifies that every runtime file remains present. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:distribution`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse`, `composer test` and `composer test:coverage`. The coverage command requires Xdebug and enforces the non-decreasing 80% baseline.
+`composer check` is the fast non-Pest quality gate. It validates the date-aware PHP/Laravel support policy, runs strict Composer validation, builds and inspects the package distribution archive, runs the security audit, generates an optimized strict-PSR autoloader, checks Pint formatting and runs PHPStan. `composer check:all` adds Pest once. The focused commands remain available as `composer check:support`, `composer check:composer`, `composer check:distribution`, `composer check:security`, `composer check:autoload`, `composer format:test`, `composer analyse`, `composer test` and `composer test:coverage`. The coverage command requires Xdebug and enforces the non-decreasing 80% baseline.
 
 Run the real application end-to-end suite before a release:
 
@@ -534,19 +542,23 @@ composer test:e2e
 composer check:release
 ```
 
-`composer test:e2e` creates temporary fresh Laravel 12 and 13 applications, installs this checkout through a copied Composer path repository, builds real config and route caches, and sends HTTP requests through PHP's built-in server. It verifies bounded pre-bootstrap CLI repair, the process-control-disabled in-app fallback, a custom `APP_CONFIG_CACHE` path and Laravel 13 with `.laravel` as its active bootstrap path. `composer check:release` additionally builds a Composer ZIP and installs that exact artifact before running the E2E suite. The temporary applications are removed automatically. Composer's default process timeout is disabled only for these network-heavy E2E commands. Use `composer test:e2e -- --laravel=12` to run one framework version or add `--keep` to retain a failing fixture for inspection.
+`composer test:e2e` runs the full suite by default. It creates temporary fresh Laravel 12 and 13 applications, installs this checkout through a copied Composer path repository, builds real config and route caches, and sends HTTP requests through PHP's built-in server. It verifies bounded pre-bootstrap CLI repair, the process-control-disabled in-app fallback, a custom `APP_CONFIG_CACHE` path and Laravel 13 with `.laravel` as its active bootstrap path. `composer check:release` runs the fast quality gate, Pest, builds a Composer ZIP and installs that exact artifact before running the full E2E suite. The temporary applications are removed automatically. Composer's default process timeout is disabled only for these network-heavy E2E commands.
 
-GitHub Actions runs the complete package test matrix and a fresh-application E2E matrix for every supported Laravel/PHP combination on five commonly relevant environments:
+Use `composer test:e2e -- --laravel=12` to run one framework version or add `--keep` to retain a failing full-E2E fixture for inspection. The CI portability path uses `composer test:e2e -- --laravel=12 --suite=smoke`: that focused suite fetches the Laravel skeleton with `create-project --no-install`, resolves Laravel plus this package in one dependency-install phase and validates the platform-sensitive pre-bootstrap stale-config repair path without repeating the full HTTP scenarios.
 
-- Ubuntu Linux x64
-- Windows x64
-- macOS ARM64 / Apple Silicon
-- Ubuntu Linux ARM64
-- Alpine Linux x64 in the official PHP Docker image
+GitHub Actions deliberately separates runtime compatibility from platform portability:
 
-All seven compatible runtime pairs run as both package and E2E tests on Ubuntu Linux x64 and Windows x64. Package tests keep the minimum and latest supported pairs on macOS ARM64, Linux ARM64 and Alpine Linux; their E2E jobs use the latest pair. This produces 37 compatibility jobs instead of 70 while preserving complete Windows/Linux x64 coverage and representative portability checks. Two Linux jobs test the lowest supported Composer dependency set, pull requests receive dependency review, coverage includes the real pre-bootstrap guard, and one stable `CI gate` combines every required result. The complete workflow also runs weekly to detect upstream runner or dependency drift.
+- Linux x64 runs package tests for every supported PHP/Laravel pair: PHP 8.2–8.5 with Laravel 12 and PHP 8.3–8.5 with Laravel 13.
+- Linux x64 runs the full real-application E2E suite on the lowest supported PHP runtime for each Laravel major.
+- Windows x64, macOS ARM64, Ubuntu Linux ARM64 and Alpine Linux x64 each start one PHP 8.5 environment, then run Laravel 12 and Laravel 13 package tests plus the focused portability smoke suite in that same environment.
+- Separate Linux jobs verify the minimum supported Composer dependency set for Laravel 12 and 13.
+- Coverage includes the real pre-bootstrap guard and maintains the 80% minimum.
+- Pull requests receive dependency review.
+- A stable `CI gate` combines required results. Intentionally skipped jobs are accepted only when the CI planner classified them as unnecessary for that change.
+- Documentation-only pull requests keep the required `CI gate` but skip the expensive runtime, E2E, portability, minimum-dependency and coverage jobs.
+- Runtime, Composer, test, workflow, release and scheduled weekly checks run the full matrix.
 
-Stable releases use a release pull request. A maintainer starts **Prepare release PR** from GitHub Actions and selects a patch, minor or major increment. The workflow prepares the versioned changelog, opens the release PR, approves the generated test run for that exact release commit and enables auto-merge. The protected branch keeps that merge blocked until the required `CI gate` passes. After auto-merge, the workflow explicitly starts protected `main`, which creates the annotated tag, tests the exact release ZIP, uploads its checksum and provenance, creates the GitHub Release and verifies that the existing Packagist webhook exposes the same version and commit. No Packagist token or local signing key is required.
+Stable releases use a release pull request. A maintainer starts **Prepare release PR** from GitHub Actions and selects a patch, minor or major increment. The workflow prepares the versioned changelog, opens the release PR, approves the generated test run for that exact release commit and enables auto-merge. The protected branch keeps that merge blocked until the required `CI gate` passes. After auto-merge, the workflow explicitly starts protected `main`. The release job only allocates on a normal main push when the changelog diff introduces a newly prepared dated SemVer release, or when main is explicitly dispatched. It then creates the annotated tag, tests the exact release ZIP, uploads its checksum and provenance, creates the GitHub Release and verifies that Packagist exposes the same version and commit. No Packagist token or local signing key is required.
 
 ## Uninstall
 
@@ -581,7 +593,8 @@ rm -f bootstrap/cache/route-cache-refresh.succeeded
 
 This package is intentionally small and file-based.
 
-- It does not read `.env` values.
+- It does not parse, log or store `.env` values; content-signature mode may hash source bytes in memory.
+- It does not persist raw application or canonical runtime paths; config runtime identity is stored only through one-way signature material.
 - It does not store secrets.
 - It does not send data to external services.
 - It does not use a database.
