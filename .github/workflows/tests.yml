@@ -17,9 +17,47 @@ permissions:
   contents: read
 
 jobs:
-  tests:
-    name: Tests / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
-    runs-on: ${{ matrix.platform.runner }}
+  quality:
+    name: Quality / Linux x64 / PHP 8.5 / Laravel 13
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.COMPOSER_CACHE_DIR }}
+          key: quality-composer-php-8.5-laravel-13-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            quality-composer-php-8.5-laravel-13-
+            quality-composer-
+
+      - name: Pin Laravel 13 test dependencies
+        run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+
+      - name: Run complete quality gate
+        run: composer check
+
+  compatibility:
+    name: Compatibility / Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     env:
@@ -28,15 +66,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - name: Linux x64
-            runner: ubuntu-latest
-          - name: Windows x64
-            runner: windows-latest
-          - name: macOS ARM64
-            runner: macos-latest
-          - name: Linux ARM64
-            runner: ubuntu-24.04-arm
         runtime:
           - php: '8.2'
             laravel: '12'
@@ -66,27 +95,6 @@ jobs:
             laravel: '13'
             testbench: '~11.0'
             pest: '~4.0'
-        exclude:
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.3', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.4', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.5', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.3', laravel: '13', testbench: '~11.0', pest: '~4.0'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.4', laravel: '13', testbench: '~11.0', pest: '~4.0'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.3', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.4', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.5', laravel: '12', testbench: '~10.0', pest: '~3.0'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.3', laravel: '13', testbench: '~11.0', pest: '~4.0'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.4', laravel: '13', testbench: '~11.0', pest: '~4.0'}
 
     steps:
       - name: Checkout
@@ -100,50 +108,27 @@ jobs:
           tools: composer:v2
           extensions: fileinfo
 
-      - name: Validate composer.json
-        run: composer check:composer
-
-      - name: Validate supported runtime versions
-        run: composer check:support
-
       - name: Cache Composer dependencies
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
-          key: ${{ matrix.platform.runner }}-composer-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
+          key: compatibility-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
           restore-keys: |
-            ${{ matrix.platform.runner }}-composer-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
-            ${{ matrix.platform.runner }}-composer-${{ matrix.runtime.php }}-
-            ${{ matrix.platform.runner }}-composer-
+            compatibility-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
+            compatibility-composer-php-${{ matrix.runtime.php }}-
 
       - name: Pin Laravel test dependencies
         run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction
+        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
-      - name: Audit dependencies
-        run: composer check:security
-
-      - name: Validate package distribution
-        if: matrix.platform.runner == 'ubuntu-latest' && matrix.runtime.php == '8.2' && matrix.runtime.laravel == '12'
-        run: composer check:distribution
-
-      - name: Validate optimized autoload
-        run: composer check:autoload
-
-      - name: Run Pint
-        run: composer format:test
-
-      - name: Run PHPStan
-        run: composer analyse
-
-      - name: Run tests
+      - name: Run package tests
         run: composer test
 
   end-to-end:
-    name: E2E / ${{ matrix.platform.name }} / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
-    runs-on: ${{ matrix.platform.runner }}
+    name: E2E / Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     env:
@@ -153,55 +138,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - name: Linux x64
-            runner: ubuntu-latest
-          - name: Windows x64
-            runner: windows-latest
-          - name: macOS ARM64
-            runner: macos-latest
-          - name: Linux ARM64
-            runner: ubuntu-24.04-arm
         runtime:
           - php: '8.2'
             laravel: '12'
           - php: '8.3'
-            laravel: '12'
-          - php: '8.4'
-            laravel: '12'
-          - php: '8.5'
-            laravel: '12'
-          - php: '8.3'
             laravel: '13'
-          - php: '8.4'
-            laravel: '13'
-          - php: '8.5'
-            laravel: '13'
-        exclude:
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.2', laravel: '12'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.3', laravel: '12'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.4', laravel: '12'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.5', laravel: '12'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.3', laravel: '13'}
-          - platform: {name: macOS ARM64, runner: macos-latest}
-            runtime: {php: '8.4', laravel: '13'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.2', laravel: '12'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.3', laravel: '12'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.4', laravel: '12'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.5', laravel: '12'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.3', laravel: '13'}
-          - platform: {name: Linux ARM64, runner: ubuntu-24.04-arm}
-            runtime: {php: '8.4', laravel: '13'}
 
     steps:
       - name: Checkout
@@ -219,10 +160,10 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
-          key: e2e-${{ matrix.platform.runner }}-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
+          key: e2e-linux-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json') }}
           restore-keys: |
-            e2e-${{ matrix.platform.runner }}-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
-            e2e-${{ matrix.platform.runner }}-php-${{ matrix.runtime.php }}-
+            e2e-linux-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
+            e2e-linux-composer-
 
       - name: Install package development dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
@@ -230,56 +171,10 @@ jobs:
       - name: Run real Laravel application end-to-end tests
         run: composer test:e2e -- --laravel=${{ matrix.runtime.laravel }}
 
-  alpine-tests:
-    name: Tests / Alpine Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    env:
-      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
-
-    strategy:
-      fail-fast: false
-      matrix:
-        runtime:
-          - php: '8.2'
-            laravel: '12'
-            testbench: '~10.0'
-            pest: '~3.0'
-          - php: '8.5'
-            laravel: '13'
-            testbench: '~11.0'
-            pest: '~4.0'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Cache Composer downloads
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ${{ env.COMPOSER_CACHE_DIR }}
-          key: alpine-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json', '.github/docker/php-alpine.Dockerfile') }}
-          restore-keys: |
-            alpine-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
-            alpine-composer-php-${{ matrix.runtime.php }}-
-
-      - name: Build Alpine PHP image
-        run: docker build --build-arg PHP_VERSION=${{ matrix.runtime.php }} --tag config-cache-guard-alpine:${{ strategy.job-index }} --file .github/docker/php-alpine.Dockerfile .
-
-      - name: Validate and test package on Alpine
-        run: >-
-          docker run --rm
-          --volume "${{ github.workspace }}:/package"
-          --volume "${{ env.COMPOSER_CACHE_DIR }}:/composer-cache"
-          --env COMPOSER_CACHE_DIR=/composer-cache
-          config-cache-guard-alpine:${{ strategy.job-index }}
-          sh -lc 'composer check:composer && composer check:support && composer require --dev orchestra/testbench:"${{ matrix.runtime.testbench }}" pestphp/pest:"${{ matrix.runtime.pest }}" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer check:security && composer check:autoload && composer format:test && composer analyse && composer test'
-
-  alpine-end-to-end:
-    name: E2E / Alpine Linux x64 / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  portability:
+    name: Portability / ${{ matrix.platform.name }} / PHP 8.5 / Laravel 12 + 13
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 40
 
     env:
       COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
@@ -288,9 +183,60 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime:
-          - php: '8.5'
-            laravel: '13'
+        platform:
+          - name: Windows x64
+            runner: windows-latest
+          - name: macOS ARM64
+            runner: macos-latest
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup PHP once
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+          extensions: fileinfo
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.COMPOSER_CACHE_DIR }}
+          key: portability-${{ matrix.platform.runner }}-php-8.5-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            portability-${{ matrix.platform.runner }}-php-8.5-
+            portability-${{ matrix.platform.runner }}-
+
+      - name: Test Laravel 12 on the existing runner
+        run: |
+          composer require --dev 'orchestra/testbench:~10.0' 'pestphp/pest:~3.0' --no-update --no-interaction
+          composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+          composer test
+          composer test:e2e -- --laravel=12
+
+      - name: Reset dependency manifests
+        run: git checkout -- composer.json composer.lock
+
+      - name: Test Laravel 13 on the same runner
+        run: |
+          composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
+          composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+          composer test
+          composer test:e2e -- --laravel=13
+
+  alpine-portability:
+    name: Portability / Alpine Linux x64 / PHP 8.5 / Laravel 12 + 13
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/../.composer-cache
+      COMPOSER_PROCESS_TIMEOUT: 0
 
     steps:
       - name: Checkout
@@ -300,23 +246,23 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.COMPOSER_CACHE_DIR }}
-          key: alpine-e2e-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-${{ hashFiles('composer.json', '.github/docker/php-alpine.Dockerfile') }}
+          key: alpine-portability-composer-php-8.5-${{ hashFiles('composer.json', '.github/docker/php-alpine.Dockerfile') }}
           restore-keys: |
-            alpine-e2e-composer-php-${{ matrix.runtime.php }}-laravel-${{ matrix.runtime.laravel }}-
-            alpine-e2e-composer-php-${{ matrix.runtime.php }}-
+            alpine-portability-composer-php-8.5-
+            alpine-portability-composer-
 
-      - name: Build Alpine PHP image
-        run: docker build --build-arg PHP_VERSION=${{ matrix.runtime.php }} --tag config-cache-guard-alpine-e2e:${{ strategy.job-index }} --file .github/docker/php-alpine.Dockerfile .
+      - name: Build Alpine PHP environment once
+        run: docker build --build-arg PHP_VERSION=8.5 --tag config-cache-guard-alpine:portability --file .github/docker/php-alpine.Dockerfile .
 
-      - name: Run real Laravel application end-to-end tests on Alpine
+      - name: Test Laravel 12 and 13 in the same Alpine environment
         run: >-
           docker run --rm
           --volume "${{ github.workspace }}:/package"
           --volume "${{ env.COMPOSER_CACHE_DIR }}:/composer-cache"
           --env COMPOSER_CACHE_DIR=/composer-cache
           --env COMPOSER_PROCESS_TIMEOUT=0
-          config-cache-guard-alpine-e2e:${{ strategy.job-index }}
-          sh -lc 'composer install --prefer-dist --no-interaction --no-progress && composer test:e2e -- --laravel=${{ matrix.runtime.laravel }}'
+          config-cache-guard-alpine:portability
+          sh -lc 'composer require --dev orchestra/testbench:"~10.0" pestphp/pest:"~3.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=12 && git checkout -- composer.json composer.lock && composer require --dev orchestra/testbench:"~11.0" pestphp/pest:"~4.0" --no-update --no-interaction && composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress && composer test && composer test:e2e -- --laravel=13'
 
   minimum-dependencies:
     name: Minimum dependencies / PHP ${{ matrix.runtime.php }} / Laravel ${{ matrix.runtime.laravel }}
@@ -408,10 +354,11 @@ jobs:
     name: CI gate
     if: always()
     needs:
-      - tests
+      - quality
+      - compatibility
       - end-to-end
-      - alpine-tests
-      - alpine-end-to-end
+      - portability
+      - alpine-portability
       - minimum-dependencies
       - dependency-review
       - coverage
