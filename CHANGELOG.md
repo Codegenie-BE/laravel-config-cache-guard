@@ -20,7 +20,8 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Stopped persisting raw cache filesystem paths in success markers; new markers store only a SHA-256 cache identity while legacy markers remain readable without exposing their raw path in status output.
 - Surfaced major GitHub Actions upgrades for manual review instead of globally ignoring them in Dependabot, while keeping automatic merge limited to minor/patch updates; also updated `actions/attest-build-provenance` to 3.2.0.
 - Removed hardcoded package-version metadata from the GitHub Pages site so release information cannot become stale independently from Packagist and GitHub Releases.
-- Reduced transient GitHub/Composer portability failures by limiting Composer HTTP concurrency to four and retrying failed portability dependency updates up to two additional times with bounded 10/20-second backoff, while leaving Composer 2.10's security-oriented dist-to-source fallback disabled.
+- Reduced transient GitHub/Composer CI dependency failures by limiting Composer HTTP concurrency to four workflow-wide and retrying CI `composer update` operations up to two additional times with bounded 10/20-second backoff, while leaving Composer 2.10's security-oriented dist-to-source fallback disabled.
+- Made pending release publication recoverable after transient CI failures by re-detecting the latest changelog tag on `main`, preserving a pending release until it is tagged on another commit, and allowing the release job to evaluate after a successful rerun of the aggregate CI gate.
 
 ## v1.5.0 - 2026-08-17
 

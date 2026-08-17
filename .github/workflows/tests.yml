@@ -16,6 +16,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  COMPOSER_MAX_PARALLEL_HTTP: 4
+
 jobs:
   plan:
     name: CI plan
@@ -78,6 +81,17 @@ jobs:
             full=true
           fi
 
+          if [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            head="$(git rev-parse HEAD)"
+            pending_tag="$(php tests/Support/detect-release.php)"
+            tag_commit="$(git rev-list --max-count=1 "${pending_tag}" 2>/dev/null || true)"
+
+            if [ -z "$tag_commit" ] || [ "$tag_commit" = "$head" ]; then
+              release=true
+              full=true
+            fi
+          fi
+
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "full=$full release=$release"
@@ -117,7 +131,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Run complete quality gate
         run: composer check
@@ -134,6 +148,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         runtime:
           - php: '8.2'
@@ -190,7 +205,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Run package tests
         run: composer test
@@ -208,6 +223,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         runtime:
           - php: '8.2'
@@ -256,6 +272,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         platform:
           - name: Windows x64
@@ -356,6 +373,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         runtime:
           - php: '8.2'
@@ -383,7 +401,9 @@ jobs:
         run: composer require --dev 'orchestra/testbench:${{ matrix.runtime.testbench }}' 'pestphp/pest:${{ matrix.runtime.pest }}' --no-update --no-interaction
 
       - name: Install minimum supported dependencies
-        run: composer update --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: |
+          # Native equivalent: composer update --prefer-lowest --prefer-stable
+          sh tests/Support/composer-update-retry.sh --prefer-lowest --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate minimum dependency runtime
         run: |
@@ -429,7 +449,7 @@ jobs:
         run: composer require --dev 'orchestra/testbench:~11.0' 'pestphp/pest:~4.0' --no-update --no-interaction
 
       - name: Install dependencies
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Enforce coverage baseline
         run: composer test:coverage
@@ -463,8 +483,12 @@ jobs:
   release:
     name: Publish pending release
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.release == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      always() &&
+      needs.ci-gate.result == 'success' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.release == 'true') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      )
     needs:
       - plan
       - ci-gate
@@ -550,7 +574,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.release.outputs.publish == 'true'
-        run: composer update --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
+        run: sh tests/Support/composer-update-retry.sh --prefer-stable --prefer-dist --with-all-dependencies --no-interaction --no-progress
 
       - name: Validate release tag and changelog
         if: steps.release.outputs.publish == 'true'
