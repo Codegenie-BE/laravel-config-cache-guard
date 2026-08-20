@@ -18,13 +18,15 @@ jobs:
           ref: perf/request-hot-path-v2-final
           fetch-depth: 0
 
-      - name: Populate Unreleased and remove this helper
+      - name: Populate Unreleased
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('CHANGELOG.md')
           text = path.read_text()
+          if 'Replaced the large synchronous pre-bootstrap repair script' in text:
+              raise SystemExit(0)
           marker = '## Unreleased\n\n'
           notes = '''## Unreleased
 
@@ -42,12 +44,11 @@ jobs:
 '''
           if marker not in text:
               raise SystemExit('Unreleased marker not found')
-          if not text.startswith('# Changelog'):
-              raise SystemExit('Unexpected changelog format')
-          text = text.replace(marker, notes, 1)
-          path.write_text(text)
+          path.write_text(text.replace(marker, notes, 1))
           PY
-          git rm .github/workflows/fill-unreleased.yml
+          if git diff --quiet -- CHANGELOG.md; then
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
