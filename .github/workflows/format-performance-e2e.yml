@@ -1,0 +1,44 @@
+name: Format performance E2E
+
+on:
+  push:
+    branches:
+      - perf/request-hot-path-v2-final
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: perf/request-hot-path-v2-final
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Format production E2E
+        run: vendor/bin/pint tests/E2E/LaravelConfigCacheGuardProductionE2e.php
+
+      - name: Commit exact Pint output
+        shell: bash
+        run: |
+          if git diff --quiet -- tests/E2E/LaravelConfigCacheGuardProductionE2e.php; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/E2E/LaravelConfigCacheGuardProductionE2e.php
+          git commit -m "Format production E2E"
+          git push origin HEAD:perf/request-hot-path-v2-final
