@@ -224,6 +224,7 @@ final class DeploymentCacheRepairer
     ): void {
         $cacheFile = ConfigCacheFile::current($basePath, $cachePath);
         $pendingPath = RepairState::pendingPath($cachePath, 'config');
+
         $sourceChanged = $currentSignature !== null
             && $pendingSignature !== null
             && ! hash_equals($pendingSignature, $currentSignature);
@@ -259,7 +260,7 @@ final class DeploymentCacheRepairer
         $removed = self::removeCacheFile($cacheFile);
         @unlink($pendingPath);
 
-        if ($sourceChanged && $currentSignature !== null) {
+        if ($sourceChanged) {
             RepairState::queue(
                 $cachePath,
                 'config',
@@ -275,7 +276,7 @@ final class DeploymentCacheRepairer
         $reason = match (true) {
             ! $removed => 'stale_cache_removal_failed',
             $currentSignature === null => 'source_signature_unavailable',
-            $signatureAttempted && ! $signatureWritten => 'signature_write_failed',
+            $signatureAttempted => 'signature_write_failed',
             default => 'auto_repair_failed',
         };
 
@@ -350,7 +351,7 @@ final class DeploymentCacheRepairer
         $removed = self::removeCacheFile($cacheFile);
         @unlink($pendingPath);
 
-        if ($sourceChanged && $currentSignature !== null) {
+        if ($sourceChanged) {
             RepairState::queue(
                 $cachePath,
                 'route',
@@ -367,7 +368,7 @@ final class DeploymentCacheRepairer
             ! $removed => 'stale_cache_removal_failed',
             $currentSignature === null => 'source_signature_unavailable',
             $versionedAttempted && ! $versionedWritten => 'versioned_route_cache_write_failed',
-            $signatureAttempted && ! $signatureWritten => 'signature_write_failed',
+            $signatureAttempted => 'signature_write_failed',
             default => 'auto_repair_failed',
         };
 
