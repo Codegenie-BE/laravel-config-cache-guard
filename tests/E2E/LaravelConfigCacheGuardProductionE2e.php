@@ -342,7 +342,7 @@ final class LaravelConfigCacheGuardProductionE2e
         $this->withServer(false, function () use (&$durations): void {
             $this->requestJsonTimed();
 
-            for ($i = 0; $i < self::HEALTHY_SAMPLE_COUNT; $i++) {
+            for ($i = 0; $i < self::HEALTHY_SAMPLE_COUNT; $i += 1) {
                 [$response, $milliseconds] = $this->requestJsonTimed();
                 $this->assertResponse(
                     $response,
