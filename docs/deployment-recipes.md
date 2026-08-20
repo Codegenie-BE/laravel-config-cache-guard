@@ -2,7 +2,7 @@
 
 Laravel Config Cache Guard is zero-configuration for normal applications. Package-specific `.env` variables are not required.
 
-It protects stale Laravel deployment cache before Laravel boots and automatically queues missing config and route cache creation after an HTTP response.
+The pre-bootstrap layer only detects and protects. It never waits for a lock or runs Artisan before Laravel boots. Cache creation and repair happen after the HTTP response under one non-blocking deployment repair lock.
 
 ## Preferred deployment with command access
 
@@ -29,11 +29,48 @@ When SSH, Terminal or deploy hooks are unavailable:
 4. keep Laravel's active bootstrap cache directory writable by PHP
 5. send normal HTTP traffic
 
-No `CONFIG_CACHE_GUARD_*` variable is required.
+No `CONFIG_CACHE_GUARD_*` variable or PHP CLI binary path is required.
 
-When config or route cache is missing, the package queues cache creation after the current HTTP response. The visitor does not need to wait for the missing cache to compile.
+A fresh uncached request follows this flow:
 
-When existing config or route cache is stale, the pre-bootstrap guard prevents Laravel from using that known-stale state and uses the existing repair flow.
+```text
+request
+  -> pre-bootstrap guard sees no deployment cache and does no source traversal
+  -> Laravel boots normally
+  -> response is sent
+  -> missing config/route cache is queued
+  -> one terminating request acquires deployment-cache-repair.lock
+  -> config:cache and/or route:cache run through Artisan::call()
+  -> deployment signatures and source manifest are persisted
+```
+
+When an existing cache is stale, the guard validates the deployment source manifest, removes or bypasses the unsafe cache before Laravel loads it, and queues deferred repair.
+
+## Healthy request fast path
+
+After cache and the deployment source manifest exist, normal requests do not recursively rediscover `config/`, `routes/` and `app/Providers/`.
+
+The guard verifies already-known source files and source directories directly from:
+
+```text
+bootstrap/cache/deployment-source.manifest.json
+```
+
+When a known file changes, a source directory changes, an optional deployment file appears/disappears, the active bootstrap path changes, or the runtime identity changes, the manifest is rebuilt from one shared traversal.
+
+Both config and route signatures are derived from that same snapshot.
+
+## Concurrency
+
+All deferred config/route mutation is serialized by:
+
+```text
+deployment-cache-repair.lock
+```
+
+The lock acquisition is non-blocking. A second worker that reaches termination while another worker owns the lock returns immediately instead of waiting.
+
+The repair owner performs config and route cache operations sequentially so two workers cannot mutate deployment cache concurrently.
 
 ## cPanel
 
@@ -47,13 +84,13 @@ php artisan route:cache
 php artisan config-cache-guard:status --strict
 ```
 
-Without Terminal, upload production dependencies with the application and let normal HTTP traffic perform the zero-configuration fallback.
+Without Terminal, upload production dependencies with the application and use the normal HTTP fallback.
 
 ## Plesk
 
 Use the Plesk Composer/deployment integration when available and run the same destination-side Artisan commands.
 
-When no command runner is available, use the FTP-only flow. No PHP CLI path has to be configured for automatic missing-cache creation because the normal fallback runs through Laravel's own `Artisan::call()` after the response.
+When no command runner is available, use the FTP-only flow. The package does not depend on `proc_open()`, `exec()` or a discovered PHP CLI binary for HTTP repair.
 
 ## GitHub Actions
 
@@ -72,24 +109,24 @@ Example destination step:
     php artisan config-cache-guard:status --strict
 ```
 
-For FTP-only hosting, do not assume a config cache built at a different filesystem path is portable. The package binds config signatures to the destination runtime identity and can create missing caches after the application responds.
+For FTP-only hosting, do not assume config cache built at a different filesystem path is portable. Config signatures include a one-way runtime identity, and the destination can safely create missing cache after a response.
 
-## Automatic missing-cache optimization
+## Route cache cannot be generated
 
-A fresh uncached deployment follows this flow:
+Some applications contain route definitions that Laravel cannot cache.
+
+In that case:
 
 ```text
-request
-  -> Laravel boots without missing deployment cache
-  -> response is sent
-  -> package queues/repairs config cache when missing
-  -> package queues/repairs route cache when missing
-  -> next request can use the generated caches
+route:cache fails
+  -> generated route cache is removed
+  -> failed source signature is stored
+  -> application continues with normal uncached routing
+  -> identical source state is suppressed for the failure cooldown
+  -> source changes trigger a new attempt immediately
 ```
 
-Concurrent repairs use non-blocking file locks, so multiple requests do not all rebuild the same pending target.
-
-If `route:cache` fails for the current route source signature, the application keeps using normal uncached routing. The failed signature is remembered so the same unsupported route state is not retried on every request. When route sources change, the package can try again.
+The stable failure state uses the deployment source manifest; the package does not recursively rescan route/config/provider trees on every response just to rediscover the same uncacheable route signature.
 
 ## Config-cache requirement
 
@@ -111,6 +148,8 @@ APP_ROUTES_CACHE
 
 They are optional. Standard Laravel cache paths require no configuration.
 
+For the default route cache path, the package uses signature-based route cache files. A stale old route-cache file can remain on disk during the current request because Laravel is pointed at the current signature path instead.
+
 ## Health checks
 
 After deployment:
@@ -125,10 +164,12 @@ For an automated deployment gate:
 php artisan config-cache-guard:status --strict
 ```
 
-After correcting a previously reported hosting or route-cache problem:
+After correcting a previously reported route/config cache problem:
 
 ```bash
 php artisan config-cache-guard:status --clear-failures
 ```
 
-The package never needs a public repair URL, repair token, queue worker, Redis instance, database table or cron task.
+The status command reports source-manifest state, active cache/signatures, pending/failed repairs and the shared deferred repair lock.
+
+The package never needs a public repair URL, repair token, queue worker, Redis instance, database table, cron task or pre-bootstrap child process.

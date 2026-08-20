@@ -33,13 +33,13 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        $signature = DeploymentCacheSignatures::config($basePath);
+        $signature = DeploymentSourceManifest::refresh($basePath, $cachePath)['config'];
 
         if ($signature === null || ! DeploymentCacheSignatures::write($cachePath.'/config-source.signature', $signature)) {
             return false;
         }
 
-        self::clearRepairState($cachePath, 'config');
+        RepairState::clear($cachePath, 'config');
         SuccessMarker::write(
             $cachePath.'/config-cache-refresh.succeeded',
             'config',
@@ -58,7 +58,7 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        $signature = DeploymentCacheSignatures::routes($basePath);
+        $signature = DeploymentSourceManifest::refresh($basePath, $cachePath)['routes'];
 
         if ($signature === null) {
             return false;
@@ -75,7 +75,7 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        self::clearRepairState($cachePath, 'route');
+        RepairState::clear($cachePath, 'route');
         SuccessMarker::write(
             $cachePath.'/route-cache-refresh.succeeded',
             'route',
@@ -84,11 +84,5 @@ final class DeploymentCacheTracker
         );
 
         return true;
-    }
-
-    private static function clearRepairState(string $cachePath, string $target): void
-    {
-        @unlink($cachePath.'/'.$target.'-cache-refresh.pending');
-        @unlink($cachePath.'/'.$target.'-cache-refresh.failed');
     }
 }

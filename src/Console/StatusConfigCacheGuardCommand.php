@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Codegenie\ConfigCacheGuard\Console;
 
-use Codegenie\ConfigCacheGuard\Support\BoundedProcess;
 use Codegenie\ConfigCacheGuard\Support\ConfigCacheFile;
 use Codegenie\ConfigCacheGuard\Support\DeploymentCacheSignatures;
+use Codegenie\ConfigCacheGuard\Support\DeploymentSourceManifest;
 use Codegenie\ConfigCacheGuard\Support\Environment;
 use Codegenie\ConfigCacheGuard\Support\FailureMarker;
 use Codegenie\ConfigCacheGuard\Support\RouteCacheFiles;
@@ -37,15 +37,13 @@ final class StatusConfigCacheGuardCommand extends Command
         $routeSucceededPath = $cachePath.'/route-cache-refresh.succeeded';
         $routeCachePaths = RouteCacheFiles::all($cachePath);
 
-        if ($this->option('clear-failures')) {
-            if (! $this->clearRepairMarkers([
-                $configFailedPath,
-                $configPendingPath,
-                $routeFailedPath,
-                $routePendingPath,
-            ])) {
-                return self::FAILURE;
-            }
+        if ($this->option('clear-failures') && ! $this->clearRepairMarkers([
+            $configFailedPath,
+            $configPendingPath,
+            $routeFailedPath,
+            $routePendingPath,
+        ])) {
+            return self::FAILURE;
         }
 
         $legacyIndexRequire = false;
@@ -65,16 +63,13 @@ final class StatusConfigCacheGuardCommand extends Command
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
         $configCacheExists = is_file($cachedConfigPath);
         $routeCacheExists = $routeCachePaths !== [];
-        $currentConfigSignature = $configGuardEnabled && $configCacheExists
-            ? DeploymentCacheSignatures::config($basePath)
-            : null;
-        $currentRouteSignature = $routeGuardEnabled && $routeCacheExists
-            ? DeploymentCacheSignatures::routes($basePath)
-            : null;
+        $sourceState = DeploymentSourceManifest::signatures($basePath, $cachePath);
+        $currentConfigSignature = $configGuardEnabled && $configCacheExists ? $sourceState['config'] : null;
+        $currentRouteSignature = $routeGuardEnabled && $routeCacheExists ? $sourceState['routes'] : null;
         $currentRouteCachePath = $this->effectiveRouteCachePath(
             $cachePath,
             $routeGuardEnabled,
-            $currentRouteSignature
+            $currentRouteSignature,
         );
         $configSignatureState = $configGuardEnabled
             ? $this->signatureState($configSignaturePath, $currentConfigSignature, $configCacheExists)
@@ -84,7 +79,7 @@ final class StatusConfigCacheGuardCommand extends Command
                 $routeSignaturePath,
                 $currentRouteSignature,
                 $routeCacheExists,
-                is_file($currentRouteCachePath)
+                is_file($currentRouteCachePath),
             )
             : 'disabled';
         $cacheWritable = is_writable($cachePath);
@@ -93,8 +88,6 @@ final class StatusConfigCacheGuardCommand extends Command
         $configCacheWritable = $configCacheExists
             ? is_writable($cachedConfigPath)
             : is_writable(dirname($cachedConfigPath));
-        $processControlAvailable = BoundedProcess::isAvailable();
-        $phpBinary = $this->resolvePhpBinary();
 
         $this->table(['Check', 'Status'], [
             ['Composer autoload integration', 'yes'],
@@ -104,9 +97,10 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
             ['Create config cache when missing', $automaticConfigCacheCreation ? 'yes (automatic after response)' : 'no'],
             ['Create route cache when missing', $automaticRouteCacheCreation ? 'yes (automatic after response)' : 'no'],
-            ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
+            ['Auto repair enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Source signature mode', DeploymentCacheSignatures::mode()],
+            ['Deployment source manifest', $sourceState['reused'] ? 'current' : 'refreshed'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
             ['Active Laravel cache path', $cachePath],
             ['Active Laravel cache path writable', $cacheWritable ? 'yes' : 'no'],
@@ -128,8 +122,7 @@ final class StatusConfigCacheGuardCommand extends Command
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
             ['route last successful repair', SuccessMarker::summary($routeSucceededPath) ?? 'no'],
             ['route stale cleanup last result', SuccessMarker::staleCleanupSummary($routeSucceededPath) ?? 'no'],
-            ['Bounded pre-bootstrap process control available', $processControlAvailable ? 'yes' : 'no'],
-            ['PHP CLI binary', $phpBinary ?? 'not found'],
+            ['Deferred repair lock', $cachePath.'/deployment-cache-repair.lock'],
         ]);
 
         if (! $guardEnabled) {
@@ -189,7 +182,7 @@ final class StatusConfigCacheGuardCommand extends Command
         if ($unsafeSignatureStates !== []) {
             $this->warn(
                 'Result: deployment cache state is not current ('.implode(', ', $unsafeSignatureStates).'). '
-                .'The next guarded HTTP request will reject, bypass or rebuild that cache.'
+                .'The next guarded HTTP request will bypass the unsafe cache and queue deferred repair.'
             );
 
             return $this->statusCode(false);
@@ -275,16 +268,18 @@ final class StatusConfigCacheGuardCommand extends Command
         bool $routeGuardEnabled,
         ?string $routeSignature
     ): string {
+        $configuredPath = Environment::string('APP_ROUTES_CACHE');
+
         if (
             ! $routeGuardEnabled
-            || Environment::string('APP_ROUTES_CACHE') !== null
+            || ($configuredPath !== null && ! RouteCacheFiles::isManagedPath($configuredPath))
             || ! Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
             || $routeSignature === null
         ) {
             return RouteCacheFiles::current($cachePath);
         }
 
-        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$routeSignature.'.php';
+        return RouteCacheFiles::forSignature($cachePath, $routeSignature);
     }
 
     private function signatureState(string $path, ?string $currentSignature, bool $cacheExists): string
@@ -336,42 +331,5 @@ final class StatusConfigCacheGuardCommand extends Command
     private function normalizePath(string $path): string
     {
         return rtrim(str_replace('\\', '/', $path), '/');
-    }
-
-    private function resolvePhpBinary(): ?string
-    {
-        $candidates = [
-            Environment::string('CONFIG_CACHE_GUARD_PHP_BINARY'),
-            Environment::string('PHP_CLI_BINARY'),
-            '/usr/local/bin/php',
-            '/usr/bin/php',
-            '/opt/alt/php85/usr/bin/php',
-            '/opt/alt/php84/usr/bin/php',
-            '/opt/alt/php83/usr/bin/php',
-            '/opt/alt/php82/usr/bin/php',
-            PHP_BINARY,
-        ];
-
-        foreach ($candidates as $candidate) {
-            if ($candidate === null) {
-                continue;
-            }
-
-            $basename = strtolower(basename($candidate));
-
-            if (
-                str_contains($basename, 'fpm')
-                || str_contains($basename, 'cgi')
-                || str_contains($basename, 'lsphp')
-            ) {
-                continue;
-            }
-
-            if (@is_file($candidate) && @is_executable($candidate)) {
-                return $candidate;
-            }
-        }
-
-        return null;
     }
 }

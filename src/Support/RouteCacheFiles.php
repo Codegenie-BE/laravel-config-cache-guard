@@ -26,7 +26,62 @@ final class RouteCacheFiles
             return self::resolveConfiguredPath($configuredPath, $cachePath);
         }
 
-        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-v7.php';
+        return self::defaultPath($cachePath);
+    }
+
+    /**
+     * Resolve the active route cache without enumerating the cache directory.
+     */
+    public static function existingFast(string $cachePath, ?string $storedSignature = null): ?string
+    {
+        $configuredPath = Environment::string('APP_ROUTES_CACHE');
+
+        if ($configuredPath !== null) {
+            $resolved = self::resolveConfiguredPath($configuredPath, $cachePath);
+
+            if (is_file($resolved)) {
+                return $resolved;
+            }
+
+            if (! self::isManagedPath($configuredPath)) {
+                return null;
+            }
+        }
+
+        if (is_string($storedSignature) && preg_match('/^[a-f0-9]{16,128}$/i', $storedSignature) === 1) {
+            $versioned = self::forSignature($cachePath, strtolower($storedSignature));
+
+            if (is_file($versioned)) {
+                return $versioned;
+            }
+        }
+
+        $defaultPath = self::defaultPath($cachePath);
+
+        return is_file($defaultPath) ? $defaultPath : null;
+    }
+
+    public static function forSignature(string $cachePath, string $signature): string
+    {
+        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.strtolower($signature).'.php';
+    }
+
+    public static function useVersioned(string $basePath, string $cachePath, string $signature): string
+    {
+        $path = self::forSignature($cachePath, $signature);
+        $relative = self::relativeToBase($basePath, $path);
+        Environment::set('APP_ROUTES_CACHE', $relative);
+
+        return $path;
+    }
+
+    public static function clearManagedPath(): void
+    {
+        $configuredPath = Environment::string('APP_ROUTES_CACHE');
+
+        if ($configuredPath !== null && self::isManagedPath($configuredPath)) {
+            Environment::set('APP_ROUTES_CACHE', null);
+        }
     }
 
     /**
@@ -87,23 +142,32 @@ final class RouteCacheFiles
 
     public static function seedVersioned(string $cacheFile, string $cachePath, string $signature): ?string
     {
-        if (Environment::string('APP_ROUTES_CACHE') !== null) {
+        $configuredPath = Environment::string('APP_ROUTES_CACHE');
+
+        if ($configuredPath !== null && ! self::isManagedPath($configuredPath)) {
             return $cacheFile;
         }
 
-        $versionedPath = rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
+        $versionedPath = self::forSignature($cachePath, $signature);
 
         if (self::normalizePath($cacheFile) === self::normalizePath($versionedPath)) {
             return $cacheFile;
         }
 
-        $contents = @file_get_contents($cacheFile);
+        return AtomicFile::copy($cacheFile, $versionedPath) ? $versionedPath : null;
+    }
 
-        if (! is_string($contents) || ! AtomicFile::write($versionedPath, $contents)) {
-            return null;
-        }
+    public static function isManagedPath(string $path): bool
+    {
+        return preg_match(
+            '#^(?:bootstrap|\.laravel)/cache/routes-[a-f0-9]{16,128}\.php$#i',
+            str_replace('\\', '/', $path),
+        ) === 1;
+    }
 
-        return $versionedPath;
+    private static function defaultPath(string $cachePath): string
+    {
+        return rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-v7.php';
     }
 
     private static function resolveConfiguredPath(string $path, string $cachePath): string
@@ -113,6 +177,17 @@ final class RouteCacheFiles
         }
 
         return dirname($cachePath, 2).DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+    }
+
+    private static function relativeToBase(string $basePath, string $path): string
+    {
+        $base = self::normalizePath($basePath);
+        $normalized = self::normalizePath($path);
+        $prefix = $base.'/';
+
+        return str_starts_with($normalized, $prefix)
+            ? substr($normalized, strlen($prefix))
+            : $normalized;
     }
 
     private static function isAbsolutePath(string $path): bool

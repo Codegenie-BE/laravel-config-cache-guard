@@ -40,32 +40,40 @@ final class DeploymentCacheRepairer
 
     public static function queueMissingCaches(string $basePath, string $cachePath): void
     {
-        if (
-            ! Environment::flag('CONFIG_CACHE_GUARD_ENABLED')
-            || ! Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true)
-            || ! is_dir($cachePath)
-            || ! is_writable($cachePath)
-        ) {
+        if (! self::automaticRepairAvailable($cachePath)) {
             return;
         }
 
-        if (Environment::flag('CONFIG_CACHE_GUARD_CONFIG')) {
-            $configCachePath = ConfigCacheFile::current($basePath, $cachePath);
+        $configMissing = Environment::flag('CONFIG_CACHE_GUARD_CONFIG')
+            && ! is_file(ConfigCacheFile::current($basePath, $cachePath));
+        $routeMissing = Environment::flag('CONFIG_CACHE_GUARD_ROUTES')
+            && ! self::routeCacheExists($cachePath);
 
-            if (! is_file($configCachePath)) {
-                self::queueMissingTarget(
-                    $cachePath,
-                    'config',
-                    DeploymentCacheSignatures::config($basePath),
-                );
-            }
+        if (! $configMissing && ! $routeMissing) {
+            return;
         }
 
-        if (Environment::flag('CONFIG_CACHE_GUARD_ROUTES') && ! self::routeCacheExists($basePath, $cachePath)) {
-            self::queueMissingTarget(
+        $state = DeploymentSourceManifest::signatures($basePath, $cachePath);
+
+        if ($configMissing && $state['config'] !== null) {
+            RepairState::queue(
+                $cachePath,
+                'config',
+                $state['config'],
+                'cache_missing',
+                'Laravel config cache is missing and will be created automatically.',
+                'Laravel will create this cache through Artisan::call() after the current HTTP response is sent.',
+            );
+        }
+
+        if ($routeMissing && $state['routes'] !== null) {
+            RepairState::queue(
                 $cachePath,
                 'route',
-                DeploymentCacheSignatures::routes($basePath),
+                $state['routes'],
+                'cache_missing',
+                'Laravel route cache is missing and will be created automatically when the route definitions are cacheable.',
+                'Laravel will create this cache through Artisan::call() after the current HTTP response is sent.',
             );
         }
     }
@@ -75,310 +83,12 @@ final class DeploymentCacheRepairer
      */
     public static function runPending(string $basePath, string $cachePath, ?callable $artisanCall = null): void
     {
-        if (! Environment::flag('CONFIG_CACHE_GUARD_ENABLED')) {
-            return;
-        }
-
-        if (! Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true)) {
-            return;
-        }
-
-        if (! is_dir($cachePath) || ! is_writable($cachePath)) {
+        if (! self::automaticRepairAvailable($cachePath) || ! RepairState::hasPending($cachePath)) {
             return;
         }
 
         $artisanCall ??= static fn (string $command): int => Artisan::call($command);
-
-        $configPendingPath = $cachePath.'/config-cache-refresh.pending';
-
-        if (Environment::flag('CONFIG_CACHE_GUARD_CONFIG') && is_file($configPendingPath)) {
-            self::withLock(
-                $cachePath.'/config-cache-refresh.lock',
-                static function () use ($basePath, $cachePath, $artisanCall, $configPendingPath): void {
-                    self::repairConfigIfPending($basePath, $cachePath, $configPendingPath, $artisanCall);
-                }
-            );
-        }
-
-        $routePendingPath = $cachePath.'/route-cache-refresh.pending';
-
-        if (Environment::flag('CONFIG_CACHE_GUARD_ROUTES') && is_file($routePendingPath)) {
-            self::withLock(
-                $cachePath.'/route-cache-refresh.lock',
-                static function () use ($basePath, $cachePath, $artisanCall, $routePendingPath): void {
-                    self::repairRoutesIfPending($basePath, $cachePath, $routePendingPath, $artisanCall);
-                }
-            );
-        }
-    }
-
-    private static function shouldRegisterTermination(
-        string $basePath,
-        string $cachePath,
-        bool $createMissingCaches,
-    ): bool {
-        if (self::hasPendingRepair($cachePath)) {
-            return true;
-        }
-
-        if (
-            ! $createMissingCaches
-            || ! Environment::flag('CONFIG_CACHE_GUARD_ENABLED')
-            || ! Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true)
-        ) {
-            return false;
-        }
-
-        if (
-            Environment::flag('CONFIG_CACHE_GUARD_CONFIG')
-            && ! is_file(ConfigCacheFile::current($basePath, $cachePath))
-        ) {
-            return true;
-        }
-
-        return Environment::flag('CONFIG_CACHE_GUARD_ROUTES')
-            && ! self::routeCacheExists($basePath, $cachePath);
-    }
-
-    private static function routeCacheExists(string $basePath, string $cachePath): bool
-    {
-        $configuredPath = Environment::string('APP_ROUTES_CACHE');
-
-        if ($configuredPath !== null) {
-            $resolvedPath = self::resolveConfiguredPath($configuredPath, $basePath);
-
-            if (is_file($resolvedPath)) {
-                return true;
-            }
-        }
-
-        return (glob(rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-*.php') ?: []) !== [];
-    }
-
-    private static function queueMissingTarget(string $cachePath, string $target, ?string $sourceSignature): void
-    {
-        if ($sourceSignature === null) {
-            return;
-        }
-
-        $sourceSignature = strtolower($sourceSignature);
-        $failedPath = $cachePath.'/'.$target.'-cache-refresh.failed';
-        $pendingPath = $cachePath.'/'.$target.'-cache-refresh.pending';
-
-        if (FailureMarker::sourceSignature($failedPath) === $sourceSignature) {
-            return;
-        }
-
-        if (self::pendingSourceSignature($pendingPath) === $sourceSignature) {
-            return;
-        }
-
-        if (is_file($failedPath)) {
-            @unlink($failedPath);
-        }
-
-        AtomicFile::write(
-            $pendingPath,
-            implode(PHP_EOL, [
-                'Codegenie Laravel Config Cache Guard pending auto repair',
-                'generated_at='.gmdate('c'),
-                'target='.$target,
-                'reason=cache_missing',
-                'message=Laravel '.$target.' cache is missing and will be created automatically.',
-                'action=Laravel will create this cache through Artisan::call() after the current HTTP response is sent.',
-                'source_signature='.$sourceSignature,
-                'note=No .env values, secrets, tokens or command output are stored in this file.',
-                '',
-            ])
-        );
-    }
-
-    /**
-     * Recheck the pending marker after the lock is acquired. Another request may
-     * already have completed the repair while this request was waiting.
-     *
-     * @param  callable(string): int  $artisanCall
-     */
-    private static function repairConfigIfPending(
-        string $basePath,
-        string $cachePath,
-        string $pendingPath,
-        callable $artisanCall
-    ): void {
-        if (! is_file($pendingPath)) {
-            return;
-        }
-
-        self::repairConfig($basePath, $cachePath, $artisanCall);
-    }
-
-    /**
-     * Recheck the pending marker after the lock is acquired. Another request may
-     * already have completed the repair while this request was waiting.
-     *
-     * @param  callable(string): int  $artisanCall
-     */
-    private static function repairRoutesIfPending(
-        string $basePath,
-        string $cachePath,
-        string $pendingPath,
-        callable $artisanCall
-    ): void {
-        if (! is_file($pendingPath)) {
-            return;
-        }
-
-        self::repairRoutes($basePath, $cachePath, $artisanCall);
-    }
-
-    /**
-     * @param  callable(string): int  $artisanCall
-     */
-    private static function repairConfig(string $basePath, string $cachePath, callable $artisanCall): void
-    {
-        $configCachePath = ConfigCacheFile::current($basePath, $cachePath);
-        $pendingPath = $cachePath.'/config-cache-refresh.pending';
-        $pendingSignature = self::pendingSourceSignature($pendingPath);
-        $failureReason = 'auto_repair_failed';
-        $failureMessage = 'The in-app auto repair fallback could not rebuild the Laravel config cache through Artisan::call().';
-        $failureAction = 'Check whether the application can run php artisan config:cache successfully.';
-        $failureSignature = $pendingSignature;
-
-        try {
-            $exitCode = $artisanCall('config:cache');
-
-            if ($exitCode === 0 && is_file($configCachePath)) {
-                $signature = $pendingSignature ?? DeploymentCacheSignatures::config($basePath);
-                $failureSignature = $signature;
-
-                if ($signature === null) {
-                    $failureReason = 'source_signature_unavailable';
-                    $failureMessage = 'The Laravel config cache was rebuilt, but its deployment source signature could not be calculated.';
-                    $failureAction = 'Check that the application config and deployment source files are readable.';
-                } elseif (! DeploymentCacheSignatures::write($cachePath.'/config-source.signature', $signature)) {
-                    $failureReason = 'signature_write_failed';
-                    $failureMessage = 'The Laravel config cache was rebuilt, but its deployment source signature could not be stored safely.';
-                    $failureAction = 'Fix ownership and write permissions for the config source signature in the active Laravel cache directory.';
-                } else {
-                    @unlink($pendingPath);
-                    @unlink($cachePath.'/config-cache-refresh.failed');
-                    self::invalidateOpcache($configCachePath);
-                    SuccessMarker::write(
-                        $cachePath.'/config-cache-refresh.succeeded',
-                        'config',
-                        $configCachePath,
-                        $signature
-                    );
-
-                    return;
-                }
-            }
-        } catch (Throwable) {
-            // A safe diagnostic marker is written below. Command output and exception details are intentionally not exposed.
-        }
-
-        $failureSignature ??= DeploymentCacheSignatures::config($basePath);
-        $removed = self::removeCacheFile($configCachePath);
-        @unlink($pendingPath);
-
-        FailureMarker::write(
-            $cachePath.'/config-cache-refresh.failed',
-            'config',
-            $removed ? $failureReason : 'stale_cache_removal_failed',
-            $removed
-                ? $failureMessage
-                : 'The in-app auto repair fallback failed and the resulting config cache file could not be removed safely.',
-            $removed
-                ? $failureAction.' The config cache was removed so Laravel cannot load untracked deployment state.'
-                : 'Fix the permissions for the configured config cache file before the next request. The pre-bootstrap guard will stop requests rather than load an unsafe cache file.',
-            $failureSignature,
-        );
-    }
-
-    /**
-     * @param  callable(string): int  $artisanCall
-     */
-    private static function repairRoutes(string $basePath, string $cachePath, callable $artisanCall): void
-    {
-        $pendingPath = $cachePath.'/route-cache-refresh.pending';
-        $pendingSignature = self::pendingSourceSignature($pendingPath);
-        $failureReason = 'auto_repair_failed';
-        $failureMessage = 'The in-app auto repair fallback could not rebuild the Laravel route cache through Artisan::call().';
-        $failureAction = 'Check whether this application can run php artisan route:cache successfully. Route definitions that Laravel cannot cache remain fully supported through normal uncached routing.';
-        $routeCachePath = RouteCacheFiles::current($cachePath);
-        $failureSignature = $pendingSignature;
-
-        try {
-            $exitCode = $artisanCall('route:cache');
-            $routeCachePath = RouteCacheFiles::current($cachePath);
-
-            if ($exitCode === 0 && is_file($routeCachePath)) {
-                $signature = $pendingSignature ?? DeploymentCacheSignatures::routes($basePath);
-                $failureSignature = $signature;
-
-                if ($signature === null) {
-                    $failureReason = 'source_signature_unavailable';
-                    $failureMessage = 'The Laravel route cache was rebuilt, but its deployment source signature could not be calculated.';
-                    $failureAction = 'Check that the application route, config and deployment source files are readable.';
-                } else {
-                    $trackedCachePath = Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
-                        ? RouteCacheFiles::seedVersioned($routeCachePath, $cachePath, $signature)
-                        : $routeCachePath;
-
-                    if ($trackedCachePath === null) {
-                        $failureReason = 'versioned_route_cache_write_failed';
-                        $failureMessage = 'The Laravel route cache was rebuilt, but the signature-based route cache file could not be stored safely.';
-                        $failureAction = 'Fix ownership and write permissions for the active Laravel cache directory.';
-                    } elseif (! DeploymentCacheSignatures::write($cachePath.'/route-source.signature', $signature)) {
-                        $failureReason = 'signature_write_failed';
-                        $failureMessage = 'The Laravel route cache was rebuilt, but its deployment source signature could not be stored safely.';
-                        $failureAction = 'Fix ownership and write permissions for the route source signature in the active Laravel cache directory.';
-                    } else {
-                        @unlink($pendingPath);
-                        @unlink($cachePath.'/route-cache-refresh.failed');
-                        self::invalidateOpcache($routeCachePath);
-                        self::invalidateOpcache($trackedCachePath);
-                        $cleanedFiles = RouteCacheFiles::removeStale($cachePath, [$trackedCachePath]);
-                        SuccessMarker::write(
-                            $cachePath.'/route-cache-refresh.succeeded',
-                            'route',
-                            $trackedCachePath,
-                            $signature,
-                            $cleanedFiles
-                        );
-
-                        return;
-                    }
-                }
-            }
-        } catch (Throwable) {
-            // A safe diagnostic marker is written below. Command output and exception details are intentionally not exposed.
-        }
-
-        $failureSignature ??= DeploymentCacheSignatures::routes($basePath);
-        $removed = self::removeCacheFile($routeCachePath);
-        @unlink($pendingPath);
-
-        FailureMarker::write(
-            $cachePath.'/route-cache-refresh.failed',
-            'route',
-            $removed ? $failureReason : 'stale_cache_removal_failed',
-            $removed
-                ? $failureMessage
-                : 'The in-app auto repair fallback failed and the resulting route cache file could not be removed safely.',
-            $removed
-                ? $failureAction.' The application continues with normal uncached routing until the route sources change or the failure is cleared.'
-                : 'Fix the permissions for the configured route cache file before the next request. The pre-bootstrap guard will stop requests rather than load an unsafe cache file.',
-            $failureSignature,
-        );
-    }
-
-    /**
-     * @param  callable(): void  $callback
-     */
-    private static function withLock(string $lockPath, callable $callback): void
-    {
-        $lock = @fopen($lockPath, 'c');
+        $lock = @fopen(rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'deployment-cache-repair.lock', 'c');
 
         if ($lock === false) {
             return;
@@ -389,57 +99,293 @@ final class DeploymentCacheRepairer
                 return;
             }
 
-            $callback();
+            $configPendingPath = RepairState::pendingPath($cachePath, 'config');
+            $routePendingPath = RepairState::pendingPath($cachePath, 'route');
+            $configPending = Environment::flag('CONFIG_CACHE_GUARD_CONFIG') && is_file($configPendingPath);
+            $routePending = Environment::flag('CONFIG_CACHE_GUARD_ROUTES') && is_file($routePendingPath);
+
+            if (! $configPending && ! $routePending) {
+                return;
+            }
+
+            $configPendingSignature = $configPending
+                ? FailureMarker::sourceSignature($configPendingPath)
+                : null;
+            $routePendingSignature = $routePending
+                ? FailureMarker::sourceSignature($routePendingPath)
+                : null;
+            $configExitCode = $configPending ? self::callArtisan($artisanCall, 'config:cache') : null;
+            $routeExitCode = $routePending ? self::callArtisan($artisanCall, 'route:cache') : null;
+            $state = DeploymentSourceManifest::refresh($basePath, $cachePath);
+
+            if ($configPending) {
+                self::finalizeConfigRepair(
+                    $basePath,
+                    $cachePath,
+                    $configExitCode,
+                    $configPendingSignature,
+                    $state['config'],
+                );
+            }
+
+            if ($routePending) {
+                self::finalizeRouteRepair(
+                    $cachePath,
+                    $routeExitCode,
+                    $routePendingSignature,
+                    $state['routes'],
+                );
+            }
         } finally {
             FileLock::release($lock);
             fclose($lock);
         }
     }
 
-    private static function hasPendingRepair(string $cachePath): bool
-    {
-        return is_file($cachePath.'/config-cache-refresh.pending')
-            || is_file($cachePath.'/route-cache-refresh.pending');
+    private static function shouldRegisterTermination(
+        string $basePath,
+        string $cachePath,
+        bool $createMissingCaches,
+    ): bool {
+        if (RepairState::hasPending($cachePath)) {
+            return true;
+        }
+
+        if (! $createMissingCaches || ! self::automaticRepairAvailable($cachePath)) {
+            return false;
+        }
+
+        $configMissing = Environment::flag('CONFIG_CACHE_GUARD_CONFIG')
+            && ! is_file(ConfigCacheFile::current($basePath, $cachePath));
+        $routeMissing = Environment::flag('CONFIG_CACHE_GUARD_ROUTES')
+            && ! self::routeCacheExists($cachePath);
+
+        if (! $configMissing && ! $routeMissing) {
+            return false;
+        }
+
+        $configFailedPath = RepairState::failedPath($cachePath, 'config');
+        $routeFailedPath = RepairState::failedPath($cachePath, 'route');
+
+        if (($configMissing && ! is_file($configFailedPath)) || ($routeMissing && ! is_file($routeFailedPath))) {
+            return true;
+        }
+
+        // A previous cache-generation failure is a stable state. Verify it via
+        // the manifest fast path and only schedule another attempt when its
+        // source signature changed or the bounded cooldown expired.
+        $state = DeploymentSourceManifest::signatures($basePath, $cachePath);
+
+        if (
+            $configMissing
+            && ($state['config'] === null || ! RepairState::retrySuppressed($cachePath, 'config', $state['config']))
+        ) {
+            return true;
+        }
+
+        return $routeMissing
+            && ($state['routes'] === null || ! RepairState::retrySuppressed($cachePath, 'route', $state['routes']));
     }
 
-    private static function pendingSourceSignature(string $path): ?string
+    private static function automaticRepairAvailable(string $cachePath): bool
     {
-        if (! is_file($path)) {
-            return null;
+        return Environment::flag('CONFIG_CACHE_GUARD_ENABLED')
+            && Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true)
+            && is_dir($cachePath)
+            && is_writable($cachePath);
+    }
+
+    private static function routeCacheExists(string $cachePath): bool
+    {
+        return RouteCacheFiles::existingFast(
+            $cachePath,
+            self::readSignature($cachePath.'/route-source.signature'),
+        ) !== null;
+    }
+
+    /**
+     * @param  callable(string): int  $artisanCall
+     */
+    private static function callArtisan(callable $artisanCall, string $command): int
+    {
+        try {
+            return $artisanCall($command);
+        } catch (Throwable) {
+            return 1;
+        }
+    }
+
+    private static function finalizeConfigRepair(
+        string $basePath,
+        string $cachePath,
+        ?int $exitCode,
+        ?string $pendingSignature,
+        ?string $currentSignature,
+    ): void {
+        $cacheFile = ConfigCacheFile::current($basePath, $cachePath);
+        $pendingPath = RepairState::pendingPath($cachePath, 'config');
+
+        $sourceChanged = $currentSignature !== null
+            && $pendingSignature !== null
+            && ! hash_equals($pendingSignature, $currentSignature);
+        $signatureAttempted = false;
+        $signatureWritten = false;
+
+        if (
+            $exitCode === 0
+            && is_file($cacheFile)
+            && $currentSignature !== null
+            && ! $sourceChanged
+        ) {
+            $signatureAttempted = true;
+            $signatureWritten = DeploymentCacheSignatures::write(
+                $cachePath.'/config-source.signature',
+                $currentSignature,
+            );
+
+            if ($signatureWritten) {
+                RepairState::clear($cachePath, 'config');
+                self::invalidateOpcache($cacheFile);
+                SuccessMarker::write(
+                    $cachePath.'/config-cache-refresh.succeeded',
+                    'config',
+                    $cacheFile,
+                    $currentSignature,
+                );
+
+                return;
+            }
         }
 
-        $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $removed = self::removeCacheFile($cacheFile);
+        @unlink($pendingPath);
 
-        if (! is_array($lines)) {
-            return null;
+        if ($sourceChanged) {
+            RepairState::queue(
+                $cachePath,
+                'config',
+                $currentSignature,
+                'source_changed_during_repair',
+                'Config sources changed while cache repair was running.',
+                'Retry config cache generation after the current response.',
+            );
+
+            return;
         }
 
-        foreach ($lines as $line) {
-            if (! str_starts_with($line, 'source_signature=')) {
-                continue;
+        $reason = match (true) {
+            ! $removed => 'stale_cache_removal_failed',
+            $currentSignature === null => 'source_signature_unavailable',
+            $signatureAttempted => 'signature_write_failed',
+            default => 'auto_repair_failed',
+        };
+
+        FailureMarker::write(
+            RepairState::failedPath($cachePath, 'config'),
+            'config',
+            $reason,
+            match ($reason) {
+                'stale_cache_removal_failed' => 'Config cache repair failed and the resulting cache file could not be removed safely.',
+                'source_signature_unavailable' => 'Config cache repair could not verify the current deployment source signature.',
+                'signature_write_failed' => 'The config cache was generated, but its deployment source signature could not be stored safely.',
+                default => 'Laravel config cache could not be generated safely through Artisan::call().',
+            },
+            'Check that config cache can be generated and that the active cache directory is writable.',
+            $currentSignature ?? $pendingSignature,
+        );
+    }
+
+    private static function finalizeRouteRepair(
+        string $cachePath,
+        ?int $exitCode,
+        ?string $pendingSignature,
+        ?string $currentSignature,
+    ): void {
+        $cacheFile = RouteCacheFiles::current($cachePath);
+        $pendingPath = RepairState::pendingPath($cachePath, 'route');
+        $sourceChanged = $currentSignature !== null
+            && $pendingSignature !== null
+            && ! hash_equals($pendingSignature, $currentSignature);
+        $versionedAttempted = false;
+        $versionedWritten = false;
+        $signatureAttempted = false;
+        $signatureWritten = false;
+
+        if (
+            $exitCode === 0
+            && is_file($cacheFile)
+            && $currentSignature !== null
+            && ! $sourceChanged
+        ) {
+            $versionedAttempted = Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true);
+            $trackedCacheFile = $versionedAttempted
+                ? RouteCacheFiles::seedVersioned($cacheFile, $cachePath, $currentSignature)
+                : $cacheFile;
+            $versionedWritten = $trackedCacheFile !== null;
+
+            if ($trackedCacheFile !== null) {
+                $signatureAttempted = true;
+                $signatureWritten = DeploymentCacheSignatures::write(
+                    $cachePath.'/route-source.signature',
+                    $currentSignature,
+                );
             }
 
-            $signature = substr($line, strlen('source_signature='));
+            if ($trackedCacheFile !== null && $signatureWritten) {
+                RepairState::clear($cachePath, 'route');
+                self::invalidateOpcache($cacheFile);
+                self::invalidateOpcache($trackedCacheFile);
+                $cleanedFiles = RouteCacheFiles::removeStale($cachePath, [$trackedCacheFile]);
+                SuccessMarker::write(
+                    $cachePath.'/route-cache-refresh.succeeded',
+                    'route',
+                    $trackedCacheFile,
+                    $currentSignature,
+                    $cleanedFiles,
+                );
 
-            return preg_match('/^[a-f0-9]{16,128}$/i', $signature) === 1
-                ? strtolower($signature)
-                : null;
+                return;
+            }
         }
 
-        return null;
-    }
+        $removed = self::removeCacheFile($cacheFile);
+        @unlink($pendingPath);
 
-    private static function resolveConfiguredPath(string $path, string $basePath): string
-    {
-        if (
-            str_starts_with($path, '/')
-            || str_starts_with($path, '\\')
-            || preg_match('/^[A-Za-z]:[\/\\\\]/', $path) === 1
-        ) {
-            return $path;
+        if ($sourceChanged) {
+            RepairState::queue(
+                $cachePath,
+                'route',
+                $currentSignature,
+                'source_changed_during_repair',
+                'Route sources changed while cache repair was running.',
+                'Retry route cache generation after the current response.',
+            );
+
+            return;
         }
 
-        return rtrim($basePath, '/\\').DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        $reason = match (true) {
+            ! $removed => 'stale_cache_removal_failed',
+            $currentSignature === null => 'source_signature_unavailable',
+            $versionedAttempted && ! $versionedWritten => 'versioned_route_cache_write_failed',
+            $signatureAttempted => 'signature_write_failed',
+            default => 'auto_repair_failed',
+        };
+
+        FailureMarker::write(
+            RepairState::failedPath($cachePath, 'route'),
+            'route',
+            $reason,
+            match ($reason) {
+                'stale_cache_removal_failed' => 'Route cache repair failed and the resulting cache file could not be removed safely.',
+                'source_signature_unavailable' => 'Route cache repair could not verify the current deployment source signature.',
+                'versioned_route_cache_write_failed' => 'The route cache was generated, but the signature-based route cache file could not be stored safely.',
+                'signature_write_failed' => 'The route cache was generated, but its deployment source signature could not be stored safely.',
+                default => 'Laravel route cache could not be generated safely. The application continues with uncached routing.',
+            },
+            'Make the route definitions cacheable or continue using normal uncached routing.',
+            $currentSignature ?? $pendingSignature,
+        );
     }
 
     private static function removeCacheFile(string $path): bool
@@ -450,8 +396,20 @@ final class DeploymentCacheRepairer
 
         @unlink($path);
         self::invalidateOpcache($path);
+        clearstatcache(true, $path);
 
         return ! is_file($path);
+    }
+
+    private static function readSignature(string $path): ?string
+    {
+        if (! is_file($path)) {
+            return null;
+        }
+
+        $contents = @file_get_contents($path);
+
+        return is_string($contents) && trim($contents) !== '' ? trim($contents) : null;
     }
 
     private static function invalidateOpcache(string $path): void
