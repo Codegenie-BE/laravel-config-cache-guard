@@ -45,23 +45,33 @@ final class RouteCacheFiles
     }
 
     /**
+     * @param  list<string>  $keepPaths
      * @return list<string>
      */
-    public static function stale(string $cachePath): array
+    public static function stale(string $cachePath, array $keepPaths = []): array
     {
-        $currentPath = self::normalizePath(self::current($cachePath));
+        $keep = [self::normalizePath(self::current($cachePath))];
+
+        foreach ($keepPaths as $keepPath) {
+            $keep[] = self::normalizePath($keepPath);
+        }
+
+        $keep = array_values(array_unique($keep));
 
         return array_values(array_filter(
             self::all($cachePath),
-            static fn (string $path): bool => self::normalizePath($path) !== $currentPath
+            static fn (string $path): bool => ! in_array(self::normalizePath($path), $keep, true)
         ));
     }
 
-    public static function removeStale(string $cachePath): int
+    /**
+     * @param  list<string>  $keepPaths
+     */
+    public static function removeStale(string $cachePath, array $keepPaths = []): int
     {
         $removed = 0;
 
-        foreach (self::stale($cachePath) as $path) {
+        foreach (self::stale($cachePath, $keepPaths) as $path) {
             $existed = is_file($path);
 
             @unlink($path);
@@ -73,6 +83,27 @@ final class RouteCacheFiles
         }
 
         return $removed;
+    }
+
+    public static function seedVersioned(string $cacheFile, string $cachePath, string $signature): ?string
+    {
+        if (Environment::string('APP_ROUTES_CACHE') !== null) {
+            return $cacheFile;
+        }
+
+        $versionedPath = rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
+
+        if (self::normalizePath($cacheFile) === self::normalizePath($versionedPath)) {
+            return $cacheFile;
+        }
+
+        $contents = @file_get_contents($cacheFile);
+
+        if (! is_string($contents) || ! AtomicFile::write($versionedPath, $contents)) {
+            return null;
+        }
+
+        return $versionedPath;
     }
 
     private static function resolveConfiguredPath(string $path, string $cachePath): string

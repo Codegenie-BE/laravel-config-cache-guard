@@ -64,7 +64,9 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        $trackedCacheFile = self::seedVersionedRouteCache($cacheFile, $cachePath, $signature);
+        $trackedCacheFile = Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
+            ? RouteCacheFiles::seedVersioned($cacheFile, $cachePath, $signature)
+            : $cacheFile;
 
         if (
             $trackedCacheFile === null
@@ -84,41 +86,9 @@ final class DeploymentCacheTracker
         return true;
     }
 
-    private static function seedVersionedRouteCache(
-        string $cacheFile,
-        string $cachePath,
-        string $signature
-    ): ?string {
-        if (
-            Environment::string('APP_ROUTES_CACHE') !== null
-            || ! Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true)
-        ) {
-            return $cacheFile;
-        }
-
-        $versionedPath = rtrim($cachePath, '/\\').DIRECTORY_SEPARATOR.'routes-'.$signature.'.php';
-
-        if (self::normalizePath($cacheFile) === self::normalizePath($versionedPath)) {
-            return $cacheFile;
-        }
-
-        $contents = @file_get_contents($cacheFile);
-
-        if (! is_string($contents) || ! AtomicFile::write($versionedPath, $contents)) {
-            return null;
-        }
-
-        return $versionedPath;
-    }
-
     private static function clearRepairState(string $cachePath, string $target): void
     {
         @unlink($cachePath.'/'.$target.'-cache-refresh.pending');
         @unlink($cachePath.'/'.$target.'-cache-refresh.failed');
-    }
-
-    private static function normalizePath(string $path): string
-    {
-        return rtrim(str_replace('\\', '/', $path), '/');
     }
 }
