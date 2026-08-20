@@ -40,7 +40,9 @@ final class ConfigCacheGuardServiceProvider extends ServiceProvider
         DeploymentCacheRepairer::runPendingAfterResponse(
             $this->app,
             $this->app->basePath(),
-            $this->app->bootstrapPath('cache')
+            $this->app->bootstrapPath('cache'),
+            null,
+            ! $this->app->runningUnitTests(),
         );
     }
 }

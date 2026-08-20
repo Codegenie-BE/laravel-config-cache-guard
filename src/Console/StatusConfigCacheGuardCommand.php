@@ -35,7 +35,7 @@ final class StatusConfigCacheGuardCommand extends Command
         $routeFailedPath = $cachePath.'/route-cache-refresh.failed';
         $routePendingPath = $cachePath.'/route-cache-refresh.pending';
         $routeSucceededPath = $cachePath.'/route-cache-refresh.succeeded';
-        $routeCachePaths = $this->routeCachePaths($cachePath);
+        $routeCachePaths = RouteCacheFiles::all($cachePath);
 
         if ($this->option('clear-failures')) {
             if (! $this->clearRepairMarkers([
@@ -60,7 +60,7 @@ final class StatusConfigCacheGuardCommand extends Command
         $configGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_CONFIG');
         $routeGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_ROUTES');
         $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
-        $createConfigWhenMissing = Environment::flag('CONFIG_CACHE_GUARD_CREATE_CONFIG_CACHE', false);
+        $automaticMissingCacheCreation = true;
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
         $configCacheExists = is_file($cachedConfigPath);
         $routeCacheExists = $routeCachePaths !== [];
@@ -86,14 +86,14 @@ final class StatusConfigCacheGuardCommand extends Command
                 is_file($currentRouteCachePath)
             )
             : 'disabled';
-        $processControlAvailable = BoundedProcess::isAvailable();
-        $phpBinary = $this->resolvePhpBinary();
         $cacheWritable = is_writable($cachePath);
         $customConfigCachePath = $this->normalizePath($cachedConfigPath)
             !== $this->normalizePath($cachePath.'/config.php');
         $configCacheWritable = $configCacheExists
             ? is_writable($cachedConfigPath)
             : is_writable(dirname($cachedConfigPath));
+        $processControlAvailable = BoundedProcess::isAvailable();
+        $phpBinary = $this->resolvePhpBinary();
 
         $this->table(['Check', 'Status'], [
             ['Composer autoload integration', 'yes'],
@@ -101,13 +101,11 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Guard enabled', $guardEnabled ? 'yes' : 'no'],
             ['Config guard enabled', $configGuardEnabled ? 'yes' : 'no'],
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
-            ['Create config cache when missing', $createConfigWhenMissing ? 'yes' : 'no'],
+            ['Create config cache when missing', $automaticMissingCacheCreation ? 'yes (automatic after response)' : 'no'],
+            ['Create route cache when missing', $automaticMissingCacheCreation ? 'yes (automatic after response)' : 'no'],
             ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Source signature mode', DeploymentCacheSignatures::mode()],
-            ['Failure cooldown', $this->failureCooldownSeconds().' seconds'],
-            ['Lock timeout', $this->lockTimeoutMilliseconds().' milliseconds'],
-            ['Process timeout', $this->processTimeoutSeconds().' seconds'],
             ['Fail hard', $failHard ? 'yes' : 'no'],
             ['Active Laravel cache path', $cachePath],
             ['Active Laravel cache path writable', $cacheWritable ? 'yes' : 'no'],
@@ -129,7 +127,7 @@ final class StatusConfigCacheGuardCommand extends Command
             ['route failed marker', FailureMarker::summary($routeFailedPath) ?? 'no'],
             ['route last successful repair', SuccessMarker::summary($routeSucceededPath) ?? 'no'],
             ['route stale cleanup last result', SuccessMarker::staleCleanupSummary($routeSucceededPath) ?? 'no'],
-            ['Bounded process control available', $processControlAvailable ? 'yes' : 'no'],
+            ['Bounded pre-bootstrap process control available', $processControlAvailable ? 'yes' : 'no'],
             ['PHP CLI binary', $phpBinary ?? 'not found'],
         ]);
 
@@ -145,8 +143,8 @@ final class StatusConfigCacheGuardCommand extends Command
             return $this->statusCode(false);
         }
 
-        if ($configGuardEnabled && ($configCacheExists || $createConfigWhenMissing) && ! $configCacheWritable) {
-            $this->error('Result: installed, but the configured config cache path is not writable. Stale config cannot be replaced safely.');
+        if ($configGuardEnabled && ! $configCacheWritable) {
+            $this->error('Result: installed, but the configured config cache path is not writable. Config cache cannot be created or replaced safely.');
 
             return $this->statusCode(false);
         }
@@ -190,64 +188,29 @@ final class StatusConfigCacheGuardCommand extends Command
         if ($unsafeSignatureStates !== []) {
             $this->warn(
                 'Result: deployment cache state is not current ('.implode(', ', $unsafeSignatureStates).'). '
-                .'The next guarded HTTP request will reject, bypass or rebuild that cache. Rebuild the affected cache or let the guard repair it before relying on this health check.'
+                .'The next guarded HTTP request will reject, bypass or rebuild that cache.'
             );
 
             return $this->statusCode(false);
         }
 
-        if (! $processControlAvailable || $phpBinary === null) {
-            if ($autoRepairEnabled) {
-                $this->warn('Result: bounded pre-bootstrap process execution is unavailable, but in-app auto repair can rebuild through Artisan::call() after the current HTTP response is sent.');
-            } else {
-                $this->warn('Result: automatic rebuild from web requests is unavailable. Enable CONFIG_CACHE_GUARD_AUTO_REPAIR or configure proc_open/PHP CLI.');
-            }
+        if (! $configCacheExists || ! $routeCacheExists) {
+            $missing = array_filter([
+                $configGuardEnabled && ! $configCacheExists ? 'config' : null,
+                $routeGuardEnabled && ! $routeCacheExists ? 'route' : null,
+            ]);
 
-            return $this->statusCode($autoRepairEnabled);
-        }
-
-        if ($routeGuardEnabled && $routeCachePaths === []) {
-            $message = $configGuardEnabled
-                ? 'Result: ready. Config cache refresh is available when config cache exists. Route cache refresh will activate when a route cache file exists.'
-                : 'Result: ready. Route cache refresh will activate when a route cache file exists.';
-
-            $this->info($message);
+            $this->info(
+                'Result: ready. Missing '.implode(' and ', $missing)
+                .' cache will be created automatically after a normal HTTP response when Laravel can cache it.'
+            );
 
             return self::SUCCESS;
         }
 
-        $targets = array_filter([
-            $configGuardEnabled ? 'config' : null,
-            $routeGuardEnabled ? 'route' : null,
-        ]);
-
-        $this->info('Result: ready. Automatic '.implode(' and ', $targets).' cache refresh is available.');
+        $this->info('Result: ready. Automatic config and route cache protection is available.');
 
         return self::SUCCESS;
-    }
-
-    private function failureCooldownSeconds(): int
-    {
-        $seconds = (int) (Environment::string('CONFIG_CACHE_GUARD_FAILURE_COOLDOWN') ?: 60);
-
-        return $seconds > 0 ? $seconds : 60;
-    }
-
-    private function lockTimeoutMilliseconds(): int
-    {
-        return $this->boundedInteger('CONFIG_CACHE_GUARD_LOCK_TIMEOUT', 2000, 0, 30_000);
-    }
-
-    private function processTimeoutSeconds(): int
-    {
-        return $this->boundedInteger('CONFIG_CACHE_GUARD_PROCESS_TIMEOUT', 30, 1, 300);
-    }
-
-    private function boundedInteger(string $name, int $default, int $minimum, int $maximum): int
-    {
-        $value = (int) (Environment::string($name) ?? $default);
-
-        return $value >= $minimum && $value <= $maximum ? $value : $default;
     }
 
     /**
@@ -290,14 +253,6 @@ final class StatusConfigCacheGuardCommand extends Command
         return ! $healthy && $this->option('strict')
             ? self::FAILURE
             : self::SUCCESS;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function routeCachePaths(string $cachePath): array
-    {
-        return RouteCacheFiles::all($cachePath);
     }
 
     private function effectiveRouteCachePath(
