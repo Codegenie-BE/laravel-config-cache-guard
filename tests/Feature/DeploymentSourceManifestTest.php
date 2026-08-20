@@ -89,7 +89,6 @@ it('invalidates the manifest when a new source file is added', function (): void
     try {
         $first = DeploymentSourceManifest::signatures($basePath, $cachePath);
         file_put_contents($routesPath.'/admin.php', "<?php return [];\n");
-        touch($routesPath, time() + 2);
         clearstatcache(true, $routesPath);
         $second = DeploymentSourceManifest::signatures($basePath, $cachePath);
 
