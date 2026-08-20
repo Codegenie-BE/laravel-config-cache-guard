@@ -86,6 +86,7 @@ final class LaravelConfigCacheGuardProductionE2e
 
         if ($this->keepApplication) {
             $this->info('Keeping test application at '.$this->applicationPath);
+
             return;
         }
 
@@ -623,6 +624,7 @@ PHP,
         $line = $name.'='.$value;
         $updated = preg_replace('/^'.preg_quote($name, '/').'=.*$/m', $line, $contents, 1, $count);
         self::assert(is_string($updated), 'Could not update '.$name.'.');
+
         return $count === 0 ? rtrim($contents).PHP_EOL.$line.PHP_EOL : $updated;
     }
 
@@ -645,6 +647,7 @@ PHP,
         if (! $process->isSuccessful()) {
             throw new RuntimeException(implode(' ', $command)." failed.\n".$process->getOutput().$process->getErrorOutput());
         }
+
         return $process->getOutput().$process->getErrorOutput();
     }
 
@@ -661,6 +664,7 @@ PHP,
     private function replaceOnce(string $search, string $replace, string $contents, string $description): string
     {
         self::assert(str_contains($contents, $search), 'Could not find '.$description.'.');
+
         return preg_replace('/'.preg_quote($search, '/').'/', addcslashes($replace, '\\$'), $contents, 1)
             ?? throw new RuntimeException('Could not replace '.$description.'.');
     }
@@ -669,6 +673,7 @@ PHP,
     {
         $contents = @file_get_contents($path);
         self::assert(is_string($contents), 'Could not read '.$path.'.');
+
         return $contents;
     }
 
@@ -737,6 +742,7 @@ PHP,
         self::assert(is_string($separator), 'Could not parse reserved HTTP port.');
         $port = (int) substr($separator, 1);
         self::assert($port > 0, 'Reserved HTTP port is invalid.');
+
         return $port;
     }
 
@@ -745,6 +751,7 @@ PHP,
     {
         self::assert($values !== [], 'Cannot calculate percentile from an empty sample.');
         $index = (int) ceil(count($values) * $percentile) - 1;
+
         return $values[max(0, min(count($values) - 1, $index))];
     }
 
@@ -755,6 +762,7 @@ PHP,
         if (! is_string($configured) || $configured === '') {
             return ['composer'];
         }
+
         return str_ends_with(strtolower($configured), '.phar') ? [PHP_BINARY, $configured] : [$configured];
     }
 
@@ -767,6 +775,7 @@ PHP,
     {
         $resolved = realpath($path);
         $normalized = self::normalizePath(is_string($resolved) ? $resolved : $path);
+
         return PHP_OS_FAMILY === 'Windows' ? strtolower($normalized) : $normalized;
     }
 }
