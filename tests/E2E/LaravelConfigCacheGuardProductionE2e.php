@@ -303,10 +303,10 @@ final class LaravelConfigCacheGuardProductionE2e
         $this->removeSuccessMarkers();
         $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'custom-cache-refreshed-value-longer');
 
-        $this->withServer(false, function () use ($scenario, $customRelative, $customAbsolute): void {
+        $this->withServer(false, function () use ($scenario, $customAbsolute): void {
             [$first, $requestMs] = $this->requestJsonTimed();
             $this->recordBudget($scenario, 'first_response', $requestMs, self::REQUEST_HARD_LIMIT_MS);
-            $this->assertResponse($first, 'custom-cache-refreshed-value-longer', 'restricted-refreshed-route', false, true);
+            $this->assertResponse($first, 'custom-cache-refreshed-value-longer', 'restricted-refreshed-route', false, false);
             self::assert(
                 self::comparablePath((string) ($first['config_path'] ?? '')) === self::comparablePath($customAbsolute),
                 'Laravel did not use the custom APP_CONFIG_CACHE path.',
@@ -315,7 +315,10 @@ final class LaravelConfigCacheGuardProductionE2e
             $repairMs = $this->timeUntil(
                 fn (): bool => is_file($customAbsolute)
                     && ! is_file($this->cachePath.'/config-cache-refresh.pending')
-                    && is_file($this->cachePath.'/config-cache-refresh.succeeded'),
+                    && ! is_file($this->cachePath.'/route-cache-refresh.pending')
+                    && is_file($this->cachePath.'/config-cache-refresh.succeeded')
+                    && is_file($this->cachePath.'/route-cache-refresh.succeeded')
+                    && is_file($this->cachePath.'/route-source.signature'),
                 'Custom config cache repair did not finish.',
             );
             $this->recordBudget($scenario, 'repair', $repairMs, self::REPAIR_HARD_LIMIT_MS);
