@@ -220,9 +220,37 @@ final class DeploymentCacheSignatures
         }
 
         $stats = @stat($path);
+        $entries = @scandir($path);
 
-        if (! is_array($stats)) {
+        if (! is_array($stats) || ! is_array($entries)) {
             return null;
+        }
+
+        $relevantEntries = [];
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $entryPath = rtrim($path, '/\\').DIRECTORY_SEPARATOR.$entry;
+
+            if (is_dir($entryPath)) {
+                $relevantEntries[] = 'd:'.$entry;
+
+                continue;
+            }
+
+            if (strtolower(pathinfo($entry, PATHINFO_EXTENSION)) === 'php') {
+                $relevantEntries[] = 'f:'.$entry;
+            }
+        }
+
+        sort($relevantEntries, SORT_STRING);
+        $context = hash_init(self::algorithm());
+
+        foreach ($relevantEntries as $entry) {
+            hash_update($context, $entry."\n");
         }
 
         return implode('|', [
@@ -230,6 +258,7 @@ final class DeploymentCacheSignatures
             (string) $stats['ctime'],
             (string) $stats['size'],
             (string) $stats['ino'],
+            hash_final($context),
         ]);
     }
 
