@@ -33,7 +33,7 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        $signature = DeploymentSourceManifest::signatures($basePath, $cachePath)['config'];
+        $signature = DeploymentSourceManifest::refresh($basePath, $cachePath)['config'];
 
         if ($signature === null || ! DeploymentCacheSignatures::write($cachePath.'/config-source.signature', $signature)) {
             return false;
@@ -58,7 +58,7 @@ final class DeploymentCacheTracker
             return false;
         }
 
-        $signature = DeploymentSourceManifest::signatures($basePath, $cachePath)['routes'];
+        $signature = DeploymentSourceManifest::refresh($basePath, $cachePath)['routes'];
 
         if ($signature === null) {
             return false;
