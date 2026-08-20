@@ -36,9 +36,16 @@ jobs:
                   continue
                 fi
 
-                if git merge-base --is-ancestor "origin/${branch}" origin/main; then
-                  echo "Deleting fully merged branch ${branch}."
-                  git push origin --delete "${branch}"
+                branch_sha="$(git rev-parse "refs/remotes/origin/${branch}")"
+
+                if git merge-base --is-ancestor "${branch_sha}" origin/main; then
+                  echo "Deleting fully merged branch ${branch} at ${branch_sha}."
+
+                  if ! git push \
+                    --force-with-lease="refs/heads/${branch}:${branch_sha}" \
+                    origin ":refs/heads/${branch}"; then
+                    echo "Keeping ${branch}: its remote tip changed after validation."
+                  fi
                 else
                   echo "Keeping unmerged branch ${branch}."
                 fi
