@@ -18,16 +18,25 @@ require dirname(__DIR__, 2).'/vendor/autoload.php';
 final class LaravelConfigCacheGuardProductionE2e
 {
     private const PACKAGE_NAME = 'codegenie-be/laravel-config-cache-guard';
+
     private const REQUEST_HARD_LIMIT_MS = 750.0;
+
     private const HEALTHY_P95_LIMIT_MS = 250.0;
+
     private const REPAIR_HARD_LIMIT_MS = 5000.0;
+
     private const HEALTHY_SAMPLE_COUNT = 20;
 
     private readonly string $applicationPath;
+
     private readonly string $bootstrapPath;
+
     private readonly string $cachePath;
+
     private readonly string $defaultConfigCachePath;
+
     private ?Process $server = null;
+
     private string $serverUrl = '';
 
     /** @var list<array{scenario:string, metric:string, milliseconds:float, limit_ms:float}> */
