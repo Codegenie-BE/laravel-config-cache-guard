@@ -185,7 +185,18 @@ final class DeploymentSourceManifest
             return null;
         }
 
-        return is_array($decoded) ? $decoded : null;
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        foreach (array_keys($decoded) as $key) {
+            if (! is_string($key)) {
+                return null;
+            }
+        }
+
+        /** @var array<string, mixed> $decoded */
+        return $decoded;
     }
 
     private static function absolutePath(string $basePath, string $relativePath): string
