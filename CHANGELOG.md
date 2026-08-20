@@ -3,6 +3,16 @@
 All notable changes to `codegenie-be/laravel-config-cache-guard` will be documented in this file.
 
 ## Unreleased
+- Replaced the large synchronous pre-bootstrap repair script with a minimal Composer loader and a dedicated protection-only guard, removing HTTP-side child processes, Artisan compilation and repair-lock waiting from the visitor-facing boot path.
+- Centralized config and route repair in Laravel's after-response lifecycle behind one immediate non-blocking deployment repair lock, so concurrent requests do not wait for or duplicate cache compilation.
+- Added a persistent deployment source manifest and one shared source snapshot for config and route signatures, avoiding duplicate recursive discovery on healthy requests while safely detecting added, removed and changed source files.
+- Added exact route-cache discovery, signature-versioned route cache handling, atomic route-cache copies, streaming signature hashing and request-local hashing-algorithm reuse to reduce filesystem and allocation overhead.
+- Made automatic missing-cache creation and stale-cache recovery safe under zero-configuration defaults while suppressing repeated retries for identical failed source state and preserving uncached Laravel fallback behavior.
+- Strengthened source-change race handling so caches built against a deployment that changes during repair are discarded and requeued instead of being published as current.
+- Simplified the runtime by removing the obsolete bounded child-process execution path, lock polling/timeouts and internal managed-route environment state while retaining explicit CLI diagnostic compatibility.
+- Expanded package regression coverage for deployment manifests, atomic writes, stale-cache protection, source-change races, shared repair locking, runtime path identity and cross-platform portability.
+- Reworked real Laravel 12 and 13 production E2E coverage around the non-blocking contract, including automatic cache creation, stale repair, restricted hosts, custom config-cache paths and signature-based routes.
+- Added per-scenario E2E performance measurements with monotonic timing, hard request/repair ceilings and healthy cached p50/p95 budgets so future runtime regressions fail CI instead of going unnoticed.
 
 ## v1.5.1 - 2026-08-17
 
