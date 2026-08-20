@@ -60,6 +60,8 @@ final class StatusConfigCacheGuardCommand extends Command
         $configGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_CONFIG');
         $routeGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_ROUTES');
         $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
+        $automaticConfigCacheCreation = $guardEnabled && $configGuardEnabled && $autoRepairEnabled;
+        $automaticRouteCacheCreation = $guardEnabled && $routeGuardEnabled && $autoRepairEnabled;
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
         $configCacheExists = is_file($cachedConfigPath);
         $routeCacheExists = $routeCachePaths !== [];
@@ -100,8 +102,8 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Guard enabled', $guardEnabled ? 'yes' : 'no'],
             ['Config guard enabled', $configGuardEnabled ? 'yes' : 'no'],
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
-            ['Create config cache when missing', 'yes (automatic after response)'],
-            ['Create route cache when missing', 'yes (automatic after response)'],
+            ['Create config cache when missing', $automaticConfigCacheCreation ? 'yes (automatic after response)' : 'no'],
+            ['Create route cache when missing', $automaticRouteCacheCreation ? 'yes (automatic after response)' : 'no'],
             ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Source signature mode', DeploymentCacheSignatures::mode()],
@@ -193,11 +195,20 @@ final class StatusConfigCacheGuardCommand extends Command
             return $this->statusCode(false);
         }
 
-        if (! $configCacheExists || ! $routeCacheExists) {
-            $missing = array_filter([
-                $configGuardEnabled && ! $configCacheExists ? 'config' : null,
-                $routeGuardEnabled && ! $routeCacheExists ? 'route' : null,
-            ]);
+        $missing = array_values(array_filter([
+            $configGuardEnabled && ! $configCacheExists ? 'config' : null,
+            $routeGuardEnabled && ! $routeCacheExists ? 'route' : null,
+        ]));
+
+        if ($missing !== []) {
+            if (! $autoRepairEnabled) {
+                $this->warn(
+                    'Result: '.implode(' and ', $missing)
+                    .' cache is missing and automatic creation is disabled through CONFIG_CACHE_GUARD_AUTO_REPAIR.'
+                );
+
+                return $this->statusCode(false);
+            }
 
             $this->info(
                 'Result: ready. Missing '.implode(' and ', $missing)
@@ -207,7 +218,12 @@ final class StatusConfigCacheGuardCommand extends Command
             return self::SUCCESS;
         }
 
-        $this->info('Result: ready. Automatic config and route cache protection is available.');
+        $targets = array_values(array_filter([
+            $configGuardEnabled ? 'config' : null,
+            $routeGuardEnabled ? 'route' : null,
+        ]));
+
+        $this->info('Result: ready. Automatic '.implode(' and ', $targets).' cache protection is available.');
 
         return self::SUCCESS;
     }
