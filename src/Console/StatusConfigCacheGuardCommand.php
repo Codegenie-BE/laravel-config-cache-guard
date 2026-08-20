@@ -314,7 +314,7 @@ final class StatusConfigCacheGuardCommand extends Command
             return 'missing current cache';
         }
 
-        return $this->signatureState($path, $currentRouteSignature = $currentSignature, true);
+        return $this->signatureState($path, $currentSignature, true);
     }
 
     private function normalizePath(string $path): string
