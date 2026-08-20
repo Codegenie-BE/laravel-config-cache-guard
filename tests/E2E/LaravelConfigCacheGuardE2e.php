@@ -6,7 +6,6 @@ namespace Codegenie\ConfigCacheGuard\Tests\E2E;
 
 use FilesystemIterator;
 use InvalidArgumentException;
-use JsonException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
@@ -29,6 +28,8 @@ final class LaravelConfigCacheGuardE2e
     private readonly string $defaultConfigCachePath;
 
     private ?Process $server = null;
+
+    private string $serverUrl = '';
 
     public function __construct(
         private readonly string $repositoryPath,
@@ -56,26 +57,22 @@ final class LaravelConfigCacheGuardE2e
         }
 
         $this->writeApplicationFixture();
-
         $this->info($this->artifactPackage
             ? 'Installing the package from the extracted release artifact'
             : 'Installing the package through a copied Composer path repository');
         $this->installPackage();
         $this->assertComposerInstallation();
 
-        $this->info('Building real Laravel config and route caches');
-        $this->runArtisan(['config:cache']);
-        $this->runArtisan(['route:cache']);
-        $this->assertFileExists($this->defaultConfigCachePath);
-        $this->assertRouteCacheExists();
+        $this->info('Testing zero-config automatic cache creation');
+        $this->testAutomaticCacheCreation();
 
-        $this->info('Testing pre-bootstrap repair through the PHP CLI');
-        $this->testExecRepair();
+        $this->info('Testing non-blocking stale cache repair');
+        $this->testNonBlockingStaleRepair(false, 'fast', 'E2eFastController', 'fast-refreshed-route');
 
-        $this->info('Testing deferred in-app repair with process control disabled');
-        $this->testDeferredRepair();
+        $this->info('Testing non-blocking repair with process functions disabled');
+        $this->testNonBlockingStaleRepair(true, 'restricted', 'E2eRestrictedController', 'restricted-refreshed-route');
 
-        $this->info('Testing an externally configured APP_CONFIG_CACHE path');
+        $this->info('Testing a custom APP_CONFIG_CACHE path');
         $this->testCustomConfigCachePath();
 
         $this->info('Laravel '.$this->laravelMajor.' end-to-end scenarios passed');
@@ -101,7 +98,6 @@ final class LaravelConfigCacheGuardE2e
         }
 
         self::ensureDirectory($this->temporaryPath);
-
         $this->runProcess(array_merge(self::composerCommand(), [
             'create-project',
             'laravel/laravel:^'.$this->laravelMajor.'.0',
@@ -117,32 +113,28 @@ final class LaravelConfigCacheGuardE2e
     private function activateDotLaravelBootstrapPath(): void
     {
         self::ensureDirectory($this->cachePath);
-
         $appContents = $this->read($this->applicationPath.'/bootstrap/app.php');
         $appContents = $this->replaceOnce(
             'return Application::configure(',
             '$app = Application::configure(',
             $appContents,
-            'Laravel bootstrap application assignment'
+            'Laravel bootstrap application assignment',
         );
-
-        $updatedAppContents = preg_replace(
+        $updated = preg_replace(
             '/->create\(\);\s*$/',
             "->create();\n\n\$app->useBootstrapPath(__DIR__);\n\nreturn \$app;\n",
             $appContents,
             1,
-            $replacementCount
+            $replacementCount,
         );
-
         self::assert(
-            is_string($updatedAppContents) && $replacementCount === 1,
-            'Could not configure the Laravel application to use .laravel as its bootstrap path.'
+            is_string($updated) && $replacementCount === 1,
+            'Could not configure Laravel to use .laravel as its bootstrap path.',
         );
-
-        $this->write($this->bootstrapPath.'/app.php', $updatedAppContents);
+        $this->write($this->bootstrapPath.'/app.php', $updated);
         $this->write(
             $this->bootstrapPath.'/providers.php',
-            $this->read($this->applicationPath.'/bootstrap/providers.php')
+            $this->read($this->applicationPath.'/bootstrap/providers.php'),
         );
 
         $publicIndexPath = $this->applicationPath.'/public/index.php';
@@ -152,8 +144,8 @@ final class LaravelConfigCacheGuardE2e
                 "__DIR__.'/../bootstrap/app.php'",
                 "__DIR__.'/../.laravel/app.php'",
                 $this->read($publicIndexPath),
-                'public bootstrap path'
-            )
+                'public bootstrap path',
+            ),
         );
 
         $artisanPath = $this->applicationPath.'/artisan';
@@ -163,42 +155,33 @@ final class LaravelConfigCacheGuardE2e
                 "__DIR__.'/bootstrap/app.php'",
                 "__DIR__.'/.laravel/app.php'",
                 $this->read($artisanPath),
-                'Artisan bootstrap path'
-            )
+                'Artisan bootstrap path',
+            ),
         );
     }
 
     private function writeApplicationFixture(): void
     {
-        $environmentPath = $this->applicationPath.'/.env';
         $environment = $this->read($this->applicationPath.'/.env.example');
         $environment = $this->setEnvironmentValue($environment, 'APP_ENV', 'testing');
         $environment = $this->setEnvironmentValue(
             $environment,
             'APP_KEY',
-            'base64:'.base64_encode('config-cache-guard-e2e-key-0001x')
+            'base64:'.base64_encode('config-cache-guard-e2e-key-0001x'),
         );
         $environment = $this->setEnvironmentValue($environment, 'APP_DEBUG', 'false');
         $environment = $this->setEnvironmentValue($environment, 'CACHE_STORE', 'array');
         $environment = $this->setEnvironmentValue($environment, 'LOG_CHANNEL', 'stderr');
         $environment = $this->setEnvironmentValue($environment, 'SESSION_DRIVER', 'array');
         $environment = $this->setEnvironmentValue($environment, 'E2E_CONFIG_VALUE', 'initial-config');
-        $this->write($environmentPath, $environment);
-
+        $this->write($this->applicationPath.'/.env', $environment);
         $this->write(
             $this->applicationPath.'/config/e2e.php',
-            <<<'PHP'
-<?php
-
-return [
-    'value' => env('E2E_CONFIG_VALUE', 'missing'),
-];
-PHP
+            "<?php\n\nreturn ['value' => env('E2E_CONFIG_VALUE', 'missing')];\n",
         );
-
         $this->writeController('E2eInitialController', 'initial-route');
-        $this->writeController('E2eExecController', 'exec-refreshed-route');
-        $this->writeController('E2eDeferredController', 'deferred-refreshed-route');
+        $this->writeController('E2eFastController', 'fast-refreshed-route');
+        $this->writeController('E2eRestrictedController', 'restricted-refreshed-route');
         $this->writeRoute('E2eInitialController');
     }
 
@@ -206,7 +189,6 @@ PHP
     {
         $composerPath = $this->applicationPath.'/composer.json';
         $composer = json_decode($this->read($composerPath), true, 512, JSON_THROW_ON_ERROR);
-
         self::assert(is_array($composer), 'The Laravel application composer.json is invalid.');
 
         $composer['repositories'] = [
@@ -215,20 +197,15 @@ PHP
                 'url' => self::normalizePath($this->repositoryPath),
                 'options' => [
                     'symlink' => false,
-                    'versions' => [
-                        self::PACKAGE_NAME => 'dev-e2e',
-                    ],
+                    'versions' => [self::PACKAGE_NAME => 'dev-e2e'],
                 ],
             ],
         ];
         $composer['require'][self::PACKAGE_NAME] = 'dev-e2e';
-
-        $encodedComposer = json_encode(
-            $composer,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        $this->write(
+            $composerPath,
+            json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL,
         );
-        $this->write($composerPath, $encodedComposer.PHP_EOL);
-
         $this->runProcess(array_merge(self::composerCommand(), [
             'update',
             self::PACKAGE_NAME,
@@ -244,87 +221,64 @@ PHP
     {
         $installedGuardPath = $this->applicationPath.'/vendor/'.self::PACKAGE_NAME.'/bootstrap/guard.php';
         $autoloadFilesPath = $this->applicationPath.'/vendor/composer/autoload_files.php';
-
         $this->assertFileExists($installedGuardPath);
         self::assert(! is_link(dirname($installedGuardPath, 2)), 'Composer symlinked the package instead of copying it.');
         self::assert(
             hash_file('sha256', $installedGuardPath) === hash_file('sha256', $this->repositoryPath.'/bootstrap/guard.php'),
-            'The installed guard does not match the checked-out package source.'
+            'The installed guard does not match the package source.',
         );
         self::assert(
             str_contains($this->read($autoloadFilesPath), self::PACKAGE_NAME.'/bootstrap/guard.php'),
-            'Composer did not register bootstrap/guard.php in autoload_files.php.'
+            'Composer did not register bootstrap/guard.php in autoload_files.php.',
         );
-
         $status = $this->runArtisan(['config-cache-guard:status']);
-        self::assert(
-            str_contains($status, 'Composer autoload integration'),
-            'The installed package did not register its status command.'
-        );
-        self::assert(
-            str_contains($status, 'Active Laravel cache path'),
-            'The status command did not report the active bootstrap cache path field.'
-        );
+        self::assert(str_contains($status, 'Composer autoload integration'), 'Status command is not registered.');
+        self::assert(str_contains($status, 'Deployment source manifest'), 'Status does not expose manifest state.');
     }
 
-    private function testExecRepair(): void
+    private function testAutomaticCacheCreation(): void
     {
+        $this->runArtisan(['config:clear']);
+        $this->runArtisan(['route:clear']);
+        $this->clearGuardState();
+
         $this->withServer(false, function (): void {
-            $initial = $this->requestJson();
-            $this->assertResponse($initial, 'initial-config', 'initial-route', true, true);
-            $this->assertDefaultCachePaths($initial);
-            $this->assertRepairMarkers();
+            $first = $this->requestJson();
+            $this->assertResponse($first, 'initial-config', 'initial-route', false, false);
+            $this->waitForRepair('Automatic cache creation did not complete after the response.');
 
-            $this->removeSuccessMarkers();
-            $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'exec-refreshed-config-value');
-            $this->writeRoute('E2eExecController');
-
-            $refreshed = $this->requestJson();
-            $this->assertResponse(
-                $refreshed,
-                'exec-refreshed-config-value',
-                'exec-refreshed-route',
-                true,
-                true
-            );
-            $this->assertDefaultCachePaths($refreshed);
-            $this->assertRepairMarkers();
+            $second = $this->requestJson();
+            $this->assertResponse($second, 'initial-config', 'initial-route', true, true);
+            $this->assertDefaultCachePaths($second);
+            $this->assertHealthyRepairState();
         });
     }
 
-    private function testDeferredRepair(): void
-    {
+    private function testNonBlockingStaleRepair(
+        bool $disableProcessControl,
+        string $configSuffix,
+        string $controller,
+        string $routeValue,
+    ): void {
         $this->removeSuccessMarkers();
-        $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'deferred-refreshed-config-value');
-        $this->writeRoute('E2eDeferredController');
+        $configValue = $configSuffix.'-refreshed-config-value-longer';
+        $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', $configValue);
+        $this->writeRoute($controller);
 
-        $this->withServer(true, function (): void {
-            $uncached = $this->requestJson();
-            $this->assertResponse(
-                $uncached,
-                'deferred-refreshed-config-value',
-                'deferred-refreshed-route'
+        $this->withServer($disableProcessControl, function () use ($configValue, $routeValue): void {
+            $first = $this->requestJson();
+            $this->assertResponse($first, $configValue, $routeValue, false, false);
+            self::assert(
+                ! is_file($this->defaultConfigCachePath),
+                'Known-stale config cache remained available to Laravel during the stale request.',
             );
 
-            $this->waitUntil(
-                fn (): bool => is_file($this->defaultConfigCachePath)
-                    && ! is_file($this->cachePath.'/config-cache-refresh.pending')
-                    && ! is_file($this->cachePath.'/route-cache-refresh.pending')
-                    && is_file($this->cachePath.'/config-cache-refresh.succeeded')
-                    && is_file($this->cachePath.'/route-cache-refresh.succeeded'),
-                'Deferred repair did not finish after the HTTP response.'
-            );
+            $this->waitForRepair('Stale deployment cache repair did not finish after the response.');
 
-            $cached = $this->requestJson();
-            $this->assertResponse(
-                $cached,
-                'deferred-refreshed-config-value',
-                'deferred-refreshed-route',
-                true,
-                true
-            );
-            $this->assertDefaultCachePaths($cached);
-            $this->assertRepairMarkers();
+            $second = $this->requestJson();
+            $this->assertResponse($second, $configValue, $routeValue, true, true);
+            $this->assertDefaultCachePaths($second);
+            $this->assertHealthyRepairState();
         });
     }
 
@@ -336,42 +290,68 @@ PHP
 
         $this->runArtisan(['config:clear']);
         $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'custom-cache-baseline');
-        $this->runArtisan(['config:cache'], [
-            'APP_CONFIG_CACHE' => $customRelativePath,
-        ]);
-
+        $this->runArtisan(['config:cache'], ['APP_CONFIG_CACHE' => $customRelativePath]);
         $this->assertFileExists($customAbsolutePath);
         self::assert(! is_file($this->defaultConfigCachePath), 'Laravel unexpectedly kept the default config cache.');
-
         $this->removeSuccessMarkers();
-        $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'custom-cache-refreshed-value');
+        $this->setApplicationEnvironmentValue('E2E_CONFIG_VALUE', 'custom-cache-refreshed-value-longer');
 
         $this->withServer(false, function () use ($customAbsolutePath): void {
-            $response = $this->requestJson();
+            $first = $this->requestJson();
             $this->assertResponse(
-                $response,
-                'custom-cache-refreshed-value',
-                'deferred-refreshed-route',
-                true
+                $first,
+                'custom-cache-refreshed-value-longer',
+                'restricted-refreshed-route',
+                false,
+                true,
             );
             self::assert(
-                self::comparablePath((string) $response['config_path']) === self::comparablePath($customAbsolutePath),
-                'Laravel did not use the externally configured APP_CONFIG_CACHE path.'
+                self::comparablePath((string) ($first['config_path'] ?? '')) === self::comparablePath($customAbsolutePath),
+                'Laravel did not use the custom APP_CONFIG_CACHE path.',
             );
-            self::assert(! is_file($this->defaultConfigCachePath), 'The guard rebuilt the wrong config cache file.');
-            $this->assertFileExists($customAbsolutePath);
+            self::assert(! is_file($this->defaultConfigCachePath), 'The guard created the default config cache unexpectedly.');
+
+            $this->waitUntil(
+                fn (): bool => is_file($customAbsolutePath)
+                    && ! is_file($this->cachePath.'/config-cache-refresh.pending')
+                    && is_file($this->cachePath.'/config-cache-refresh.succeeded'),
+                'Custom config cache repair did not finish after the response.',
+            );
+
+            $second = $this->requestJson();
+            $this->assertResponse(
+                $second,
+                'custom-cache-refreshed-value-longer',
+                'restricted-refreshed-route',
+                true,
+                true,
+            );
+            self::assert(
+                self::comparablePath((string) ($second['config_path'] ?? '')) === self::comparablePath($customAbsolutePath),
+                'Laravel stopped using the custom config cache after repair.',
+            );
             $this->assertFileExists($this->cachePath.'/config-source.signature');
-            $this->assertFileExists($this->cachePath.'/config-cache-refresh.succeeded');
         }, [
             'APP_CONFIG_CACHE' => $customRelativePath,
             'CONFIG_CACHE_GUARD_ROUTES' => 'false',
         ]);
     }
 
-    /**
-     * @param  callable(): void  $callback
-     * @param  array<string, string|false>  $environment
-     */
+    private function waitForRepair(string $failureMessage): void
+    {
+        $this->waitUntil(
+            fn (): bool => is_file($this->defaultConfigCachePath)
+                && ! is_file($this->cachePath.'/config-cache-refresh.pending')
+                && ! is_file($this->cachePath.'/route-cache-refresh.pending')
+                && is_file($this->cachePath.'/config-cache-refresh.succeeded')
+                && is_file($this->cachePath.'/route-cache-refresh.succeeded')
+                && is_file($this->cachePath.'/config-source.signature')
+                && is_file($this->cachePath.'/route-source.signature'),
+            $failureMessage,
+        );
+    }
+
+    /** @param callable(): void $callback */
     private function withServer(bool $disableProcessControl, callable $callback, array $environment = []): void
     {
         $this->startServer($disableProcessControl, $environment);
@@ -383,42 +363,32 @@ PHP
         }
     }
 
-    /**
-     * @param  array<string, string|false>  $environment
-     */
+    /** @param array<string, string|false> $environment */
     private function startServer(bool $disableProcessControl, array $environment): void
     {
         $this->stopServer();
-
         $port = self::availablePort();
         $routerPath = $this->applicationPath.'/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php';
         $command = [PHP_BINARY];
 
         if ($disableProcessControl) {
-            $command[] = '-d';
-            $command[] = 'disable_functions=exec,proc_open,proc_get_status,proc_terminate,proc_close';
+            array_push(
+                $command,
+                '-d',
+                'disable_functions=exec,proc_open,proc_get_status,proc_terminate,proc_close',
+            );
         }
 
-        array_push(
-            $command,
-            '-d',
-            'display_errors=1',
-            '-S',
-            '127.0.0.1:'.$port,
-            $routerPath
-        );
-
+        array_push($command, '-d', 'display_errors=1', '-S', '127.0.0.1:'.$port, $routerPath);
         $this->server = new Process(
             $command,
             $this->applicationPath.'/public',
-            $this->guardEnvironment($environment)
+            $this->guardEnvironment($environment),
         );
         $this->server->setTimeout(null);
         $this->server->start();
         $this->serverUrl = 'http://127.0.0.1:'.$port.'/e2e';
     }
-
-    private string $serverUrl = '';
 
     private function stopServer(): void
     {
@@ -434,77 +404,41 @@ PHP
         $this->serverUrl = '';
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     private function requestJson(): array
     {
         self::assert($this->server !== null, 'The E2E HTTP server is not running.');
-
         $deadline = microtime(true) + 40;
-        $lastError = 'No HTTP response was received.';
+        $lastError = 'No HTTP response received.';
 
         while (microtime(true) < $deadline) {
-            if (! $this->server->isRunning()) {
-                throw new RuntimeException(
-                    "The E2E HTTP server stopped unexpectedly.\n".$this->serverOutput()
-                );
+            $context = stream_context_create([
+                'http' => [
+                    'ignore_errors' => true,
+                    'timeout' => 5,
+                ],
+            ]);
+            $body = @file_get_contents($this->serverUrl, false, $context);
+
+            if (is_string($body) && $body !== '') {
+                $decoded = json_decode($body, true);
+
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+
+                $lastError = 'Invalid JSON response: '.$body;
+            } elseif ($this->server !== null && ! $this->server->isRunning()) {
+                throw new RuntimeException('HTTP server stopped unexpectedly.'.$this->serverOutput());
             }
 
-            $responseHeaders = [];
-            set_error_handler(static function (int $severity, string $message) use (&$lastError): bool {
-                $lastError = $message;
-
-                return true;
-            });
-
-            try {
-                $body = file_get_contents($this->serverUrl, false, stream_context_create([
-                    'http' => [
-                        'ignore_errors' => true,
-                        'timeout' => 20,
-                    ],
-                ]));
-                $responseHeaders = $http_response_header ?? [];
-            } finally {
-                restore_error_handler();
-            }
-
-            if ($body === false || $responseHeaders === []) {
-                usleep(200_000);
-
-                continue;
-            }
-
-            preg_match('/\s(\d{3})\s/', $responseHeaders[0], $statusMatch);
-            $status = isset($statusMatch[1]) ? (int) $statusMatch[1] : 0;
-
-            if ($status !== 200) {
-                throw new RuntimeException(
-                    'The E2E request returned HTTP '.$status.'. Body: '.$body."\n".$this->serverOutput()
-                );
-            }
-
-            try {
-                $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
-            } catch (JsonException $exception) {
-                throw new RuntimeException(
-                    'The E2E response is not valid JSON: '.$body."\n".$this->serverOutput(),
-                    previous: $exception
-                );
-            }
-
-            self::assert(is_array($decoded), 'The E2E JSON response is not an object.');
-
-            return $decoded;
+            usleep(100_000);
         }
 
         throw new RuntimeException($lastError."\n".$this->serverOutput());
     }
 
-    /**
-     * @param  array<string, mixed>  $response
-     */
+    /** @param array<string, mixed> $response */
     private function assertResponse(
         array $response,
         string $expectedConfig,
@@ -514,52 +448,49 @@ PHP
     ): void {
         self::assert(
             ($response['config'] ?? null) === $expectedConfig,
-            'Expected config value '.$expectedConfig.', received '.json_encode($response['config'] ?? null).'.'
+            'Expected config '.$expectedConfig.', received '.json_encode($response['config'] ?? null).'.',
         );
         self::assert(
             ($response['route'] ?? null) === $expectedRoute,
-            'Expected route value '.$expectedRoute.', received '.json_encode($response['route'] ?? null).'.'
+            'Expected route '.$expectedRoute.', received '.json_encode($response['route'] ?? null).'.',
         );
 
         if ($configCached !== null) {
             self::assert(
                 ($response['config_cached'] ?? null) === $configCached,
-                'The config cache state was not '.($configCached ? 'cached' : 'uncached').'.'
+                'The config cache state was not '.($configCached ? 'cached' : 'uncached').'.',
             );
         }
 
         if ($routesCached !== null) {
             self::assert(
                 ($response['routes_cached'] ?? null) === $routesCached,
-                'The route cache state was not '.($routesCached ? 'cached' : 'uncached').'.'
+                'The route cache state was not '.($routesCached ? 'cached' : 'uncached').'.',
             );
         }
     }
 
-    /**
-     * @param  array<string, mixed>  $response
-     */
+    /** @param array<string, mixed> $response */
     private function assertDefaultCachePaths(array $response): void
     {
-        $actualConfigPath = self::comparablePath((string) ($response['config_path'] ?? ''));
-        $expectedConfigPath = self::comparablePath($this->defaultConfigCachePath);
         self::assert(
-            $actualConfigPath === $expectedConfigPath,
-            'Laravel did not use the expected config cache path. Expected '
-                .$expectedConfigPath.', got '.$actualConfigPath.'.'
+            self::comparablePath((string) ($response['config_path'] ?? ''))
+                === self::comparablePath($this->defaultConfigCachePath),
+            'Laravel did not use the expected config cache path.',
         );
         self::assert(
             str_starts_with(
                 self::comparablePath((string) ($response['routes_path'] ?? '')),
-                self::comparablePath($this->cachePath).'/routes-'
+                self::comparablePath($this->cachePath).'/routes-',
             ),
-            'Laravel did not use the guard-managed versioned route cache path.'
+            'Laravel did not use the guard-managed versioned route cache path.',
         );
     }
 
-    private function assertRepairMarkers(): void
+    private function assertHealthyRepairState(): void
     {
         foreach ([
+            'deployment-source.manifest.json',
             'config-source.signature',
             'config-cache-refresh.succeeded',
             'route-source.signature',
@@ -578,18 +509,30 @@ PHP
         }
     }
 
+    private function clearGuardState(): void
+    {
+        foreach (glob($this->cachePath.'/*cache-refresh.*') ?: [] as $file) {
+            @unlink($file);
+        }
+
+        foreach ([
+            'config-source.signature',
+            'route-source.signature',
+            'deployment-source.manifest.json',
+            'deployment-cache-repair.lock',
+        ] as $file) {
+            @unlink($this->cachePath.'/'.$file);
+        }
+
+        foreach (glob($this->cachePath.'/routes-*.php') ?: [] as $file) {
+            @unlink($file);
+        }
+    }
+
     private function removeSuccessMarkers(): void
     {
         @unlink($this->cachePath.'/config-cache-refresh.succeeded');
         @unlink($this->cachePath.'/route-cache-refresh.succeeded');
-    }
-
-    private function assertRouteCacheExists(): void
-    {
-        self::assert(
-            (glob($this->cachePath.'/routes-*.php') ?: []) !== [],
-            'Laravel did not create a route cache file.'
-        );
     }
 
     private function writeController(string $className, string $routeValue): void
@@ -617,7 +560,7 @@ final class {$className}
         ]);
     }
 }
-PHP
+PHP,
         );
     }
 
@@ -632,7 +575,7 @@ use App\Http\Controllers\{$controller};
 use Illuminate\Support\Facades\Route;
 
 Route::get('/e2e', {$controller}::class);
-PHP
+PHP,
         );
     }
 
@@ -646,33 +589,24 @@ PHP
     {
         $replacement = $name.'='.$value;
         $updated = preg_replace('/^'.preg_quote($name, '/').'=.*$/m', $replacement, $contents, 1, $count);
-
         self::assert(is_string($updated), 'Could not update '.$name.' in the test environment.');
 
-        if ($count === 0) {
-            return rtrim($contents).PHP_EOL.$replacement.PHP_EOL;
-        }
-
-        return $updated;
+        return $count === 0
+            ? rtrim($contents).PHP_EOL.$replacement.PHP_EOL
+            : $updated;
     }
 
-    /**
-     * @param  list<string>  $arguments
-     * @param  array<string, string|false>  $environment
-     */
+    /** @param list<string> $arguments @param array<string, string|false> $environment */
     private function runArtisan(array $arguments, array $environment = []): string
     {
         return $this->runProcess(
             array_merge([PHP_BINARY, 'artisan'], $arguments, ['--no-interaction', '--no-ansi']),
             $this->applicationPath,
-            $environment
+            $environment,
         );
     }
 
-    /**
-     * @param  list<string>  $command
-     * @param  array<string, string|false>  $environment
-     */
+    /** @param list<string> $command @param array<string, string|false> $environment */
     private function runProcess(array $command, string $workingDirectory, array $environment = []): string
     {
         $process = new Process($command, $workingDirectory, $this->guardEnvironment($environment));
@@ -680,32 +614,20 @@ PHP
         $process->run();
 
         if (! $process->isSuccessful()) {
-            throw new RuntimeException(implode(' ', $command)." failed.\n".$process->getOutput().$process->getErrorOutput());
+            throw new RuntimeException(
+                implode(' ', $command)." failed.\n".$process->getOutput().$process->getErrorOutput(),
+            );
         }
 
         return $process->getOutput().$process->getErrorOutput();
     }
 
-    /**
-     * @param  array<string, string|false>  $overrides
-     * @return array<string, string|false>
-     */
+    /** @param array<string, string|false> $overrides @return array<string, string|false> */
     private function guardEnvironment(array $overrides = []): array
     {
         return array_merge([
             'APP_CONFIG_CACHE' => false,
             'APP_ROUTES_CACHE' => false,
-            'CONFIG_CACHE_GUARD_ALLOW_CLI' => false,
-            'CONFIG_CACHE_GUARD_AUTO_REPAIR' => 'true',
-            'CONFIG_CACHE_GUARD_CONFIG' => 'true',
-            'CONFIG_CACHE_GUARD_ENABLED' => 'true',
-            'CONFIG_CACHE_GUARD_FAIL_HARD' => 'false',
-            'CONFIG_CACHE_GUARD_MANAGED_APP_ROUTES_CACHE' => false,
-            'CONFIG_CACHE_GUARD_PHP_BINARY' => PHP_BINARY,
-            'CONFIG_CACHE_GUARD_ROUTES' => 'true',
-            'CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE' => 'true',
-            'COMPOSER_PROCESS_TIMEOUT' => '0',
-            'PHP_CLI_BINARY' => PHP_BINARY,
         ], $overrides);
     }
 
@@ -720,7 +642,6 @@ PHP
     private function read(string $path): string
     {
         $contents = @file_get_contents($path);
-
         self::assert(is_string($contents), 'Could not read '.$path.'.');
 
         return $contents;
@@ -730,7 +651,6 @@ PHP
     {
         self::ensureDirectory(dirname($path));
         $written = file_put_contents($path, $contents);
-
         self::assert($written === strlen($contents), 'Could not write '.$path.'.');
     }
 
@@ -756,11 +676,7 @@ PHP
 
     private function serverOutput(): string
     {
-        if ($this->server === null) {
-            return '';
-        }
-
-        return $this->server->getOutput().$this->server->getErrorOutput();
+        return $this->server === null ? '' : $this->server->getOutput().$this->server->getErrorOutput();
     }
 
     private function info(string $message): void
@@ -777,11 +693,9 @@ PHP
 
     private static function ensureDirectory(string $path): void
     {
-        if (is_dir($path)) {
-            return;
+        if (! is_dir($path)) {
+            self::assert(@mkdir($path, 0777, true) || is_dir($path), 'Could not create directory '.$path.'.');
         }
-
-        self::assert(@mkdir($path, 0777, true) || is_dir($path), 'Could not create directory '.$path.'.');
     }
 
     public static function removeDirectory(string $path): void
@@ -792,7 +706,7 @@ PHP
 
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
+            RecursiveIteratorIterator::CHILD_FIRST,
         );
 
         foreach ($iterator as $file) {
@@ -809,21 +723,19 @@ PHP
     private static function availablePort(): int
     {
         $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
-
         self::assert(is_resource($socket), 'Could not reserve an HTTP port: '.$errorMessage.' ('.$errorCode.').');
         $address = stream_socket_get_name($socket, false);
         fclose($socket);
-
         self::assert(is_string($address), 'Could not determine the reserved HTTP port.');
-        $port = (int) substr(strrchr($address, ':'), 1);
+        $separator = strrchr($address, ':');
+        self::assert(is_string($separator), 'Could not parse the reserved HTTP port.');
+        $port = (int) substr($separator, 1);
         self::assert($port > 0, 'The reserved HTTP port is invalid.');
 
         return $port;
     }
 
-    /**
-     * @return non-empty-list<string>
-     */
+    /** @return non-empty-list<string> */
     private static function composerCommand(): array
     {
         $configured = getenv('COMPOSER_BINARY');
@@ -844,21 +756,19 @@ PHP
 
     private static function comparablePath(string $path): string
     {
-        $resolvedPath = realpath($path);
-        $normalized = self::normalizePath(is_string($resolvedPath) ? $resolvedPath : $path);
+        $resolved = realpath($path);
+        $normalized = self::normalizePath(is_string($resolved) ? $resolved : $path);
 
         return PHP_OS_FAMILY === 'Windows' ? strtolower($normalized) : $normalized;
     }
 }
 
-/**
- * @return array{laravel: list<string>, keep: bool, packageArchive: ?string}
- */
+/** @return array{laravel: list<string>, keep: bool, packageArchive: ?string} */
 function e2eOptions(array $arguments): array
 {
     $policy = require dirname(__DIR__).'/Support/policy.php';
-    $supportedLaravelVersions = array_map('strval', array_keys($policy['laravel']));
-    $requestedVersion = getenv('LARAVEL_E2E_VERSION');
+    $supported = array_map('strval', array_keys($policy['laravel']));
+    $requested = getenv('LARAVEL_E2E_VERSION');
     $keep = false;
     $packageArchive = null;
 
@@ -866,42 +776,36 @@ function e2eOptions(array $arguments): array
         if ($argument === '--keep') {
             $keep = true;
         } elseif (str_starts_with($argument, '--laravel=')) {
-            $requestedVersion = substr($argument, strlen('--laravel='));
+            $requested = substr($argument, strlen('--laravel='));
         } elseif (str_starts_with($argument, '--package-archive=')) {
             $packageArchive = substr($argument, strlen('--package-archive='));
         }
     }
 
-    $currentPhpVersion = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
-    $compatibleLaravelVersions = array_values(array_filter(
-        $supportedLaravelVersions,
-        static fn (string $version): bool => in_array($currentPhpVersion, $policy['laravel'][$version]['php'], true)
+    $currentPhp = PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;
+    $compatible = array_values(array_filter(
+        $supported,
+        static fn (string $version): bool => in_array($currentPhp, $policy['laravel'][$version]['php'], true),
     ));
 
-    if ($requestedVersion === false || $requestedVersion === '' || $requestedVersion === 'all') {
-        $versions = $compatibleLaravelVersions;
-    } elseif (in_array($requestedVersion, $supportedLaravelVersions, true)) {
-        $versions = [$requestedVersion];
+    if ($requested === false || $requested === '' || $requested === 'all') {
+        $versions = $compatible;
+    } elseif (in_array($requested, $supported, true)) {
+        $versions = [$requested];
     } else {
-        throw new InvalidArgumentException(
-            'Use --laravel='.implode(', --laravel=', $supportedLaravelVersions).' or --laravel=all.'
-        );
+        throw new InvalidArgumentException('Use --laravel='.implode(', --laravel=', $supported).' or --laravel=all.');
     }
 
     foreach ($versions as $version) {
-        if (! in_array($version, $compatibleLaravelVersions, true)) {
-            throw new RuntimeException(
-                'Laravel '.$version.' end-to-end testing does not support PHP '.$currentPhpVersion.'.'
-            );
+        if (! in_array($version, $compatible, true)) {
+            throw new RuntimeException('Laravel '.$version.' E2E does not support PHP '.$currentPhp.'.');
         }
     }
 
     return ['laravel' => $versions, 'keep' => $keep, 'packageArchive' => $packageArchive];
 }
 
-/**
- * @return array{path: string, temporaryPath: string}
- */
+/** @return array{path: string, temporaryPath: string} */
 function extractE2ePackageArchive(string $archive): array
 {
     $archivePath = realpath($archive);
@@ -914,18 +818,12 @@ function extractE2ePackageArchive(string $archive): array
         throw new RuntimeException('The ZIP extension is required to test a release package archive.');
     }
 
-    $temporaryPath = rtrim(sys_get_temp_dir(), '/\\')
-        .'/laravel-config-cache-guard-artifact-'.bin2hex(random_bytes(5));
-
-    if (! mkdir($temporaryPath, 0700, true) && ! is_dir($temporaryPath)) {
-        throw new RuntimeException('Could not create the package artifact extraction directory.');
-    }
-
+    $temporaryPath = rtrim(sys_get_temp_dir(), '/\\').'/laravel-config-cache-guard-artifact-'.bin2hex(random_bytes(5));
+    assertDirectoryCreated($temporaryPath);
     $zip = new ZipArchive;
 
     if ($zip->open($archivePath) !== true) {
         LaravelConfigCacheGuardE2e::removeDirectory($temporaryPath);
-
         throw new RuntimeException('Could not open the package archive: '.$archivePath);
     }
 
@@ -943,7 +841,7 @@ function extractE2ePackageArchive(string $archive): array
 
     $composerFiles = [];
     $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($temporaryPath, FilesystemIterator::SKIP_DOTS)
+        new RecursiveDirectoryIterator($temporaryPath, FilesystemIterator::SKIP_DOTS),
     );
 
     foreach ($iterator as $file) {
@@ -954,11 +852,17 @@ function extractE2ePackageArchive(string $archive): array
 
     if (count($composerFiles) !== 1) {
         LaravelConfigCacheGuardE2e::removeDirectory($temporaryPath);
-
         throw new RuntimeException('The package archive must contain exactly one composer.json.');
     }
 
     return ['path' => dirname($composerFiles[0]), 'temporaryPath' => $temporaryPath];
+}
+
+function assertDirectoryCreated(string $path): void
+{
+    if (! mkdir($path, 0700, true) && ! is_dir($path)) {
+        throw new RuntimeException('Could not create directory '.$path.'.');
+    }
 }
 
 $repositoryPath = realpath(dirname(__DIR__, 2));
@@ -975,9 +879,9 @@ try {
     $options = e2eOptions(array_slice($argv, 1));
 
     if ($options['packageArchive'] !== null) {
-        $extractedPackage = extractE2ePackageArchive($options['packageArchive']);
-        $repositoryPath = $extractedPackage['path'];
-        $packageExtractionPath = $extractedPackage['temporaryPath'];
+        $extracted = extractE2ePackageArchive($options['packageArchive']);
+        $repositoryPath = $extracted['path'];
+        $packageExtractionPath = $extracted['temporaryPath'];
     }
 
     foreach ($options['laravel'] as $laravelMajor) {
@@ -988,7 +892,7 @@ try {
             $laravelMajor,
             $temporaryPath,
             $options['keep'],
-            $options['packageArchive'] !== null
+            $options['packageArchive'] !== null,
         );
 
         try {
