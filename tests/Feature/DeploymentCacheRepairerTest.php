@@ -16,7 +16,6 @@ function makeRepairerRuntimeProject(): string
     mkdir($basePath.'/config', 0777, true);
     mkdir($basePath.'/routes', 0777, true);
     mkdir($basePath.'/storage/framework', 0777, true);
-
     file_put_contents($basePath.'/.env', "APP_NAME=Codegenie\n");
     file_put_contents($basePath.'/config/app.php', "<?php return ['name' => 'Codegenie'];\n");
     file_put_contents($basePath.'/routes/web.php', "<?php return [];\n");
@@ -32,7 +31,7 @@ function removeRepairerRuntimeProject(string $path): void
 
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST
+        RecursiveIteratorIterator::CHILD_FIRST,
     );
 
     foreach ($iterator as $file) {
@@ -112,14 +111,14 @@ it('repairs pending config cache through Artisan call without a child process', 
                 }
 
                 return 0;
-            }
+            },
         );
 
-        expect($calls)->toBe(['config:cache']);
-        expect(is_file($cachePath.'/config.php'))->toBeTrue();
-        expect(is_file($cachePath.'/config-source.signature'))->toBeTrue();
-        expect(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse();
-        expect(is_file($cachePath.'/deployment-source.manifest.json'))->toBeTrue();
+        expect($calls)->toBe(['config:cache'])
+            ->and(is_file($cachePath.'/config.php'))->toBeTrue()
+            ->and(is_file($cachePath.'/config-source.signature'))->toBeTrue()
+            ->and(is_file($cachePath.'/config-cache-refresh.pending'))->toBeFalse()
+            ->and(is_file($cachePath.'/deployment-source.manifest.json'))->toBeTrue();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -145,15 +144,15 @@ it('repairs a missing route cache and seeds the signature based copy', function 
                 }
 
                 return 0;
-            }
+            },
         );
 
         $signature = trim((string) file_get_contents($cachePath.'/route-source.signature'));
 
-        expect($calls)->toBe(['route:cache']);
-        expect($signature)->not->toBe('');
-        expect(is_file($cachePath.'/routes-'.$signature.'.php'))->toBeTrue();
-        expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
+        expect($calls)->toBe(['route:cache'])
+            ->and($signature)->not->toBe('')
+            ->and(is_file($cachePath.'/routes-'.$signature.'.php'))->toBeTrue()
+            ->and(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -180,7 +179,7 @@ it('repairs config and route under one shared non-blocking lock', function (): v
             putenv('CONFIG_CACHE_GUARD_CONFIG=true');
             putenv('CONFIG_CACHE_GUARD_ROUTES=true');
 
-            $basePath = __DIR__;
+            $basePath = %s;
             $cachePath = $basePath.'/bootstrap/cache';
 
             \Codegenie\ConfigCacheGuard\Support\DeploymentCacheRepairer::runPending(
@@ -199,9 +198,12 @@ it('repairs config and route under one shared non-blocking lock', function (): v
                     }
 
                     return 0;
-                }
+                },
             );
-            PHP, var_export($autoloadPath, true)));
+            PHP,
+            var_export($autoloadPath, true),
+            var_export($basePath, true),
+        ));
 
         $first = new Process([PHP_BINARY, $workerPath], $basePath);
         $second = new Process([PHP_BINARY, $workerPath], $basePath);
@@ -209,21 +211,20 @@ it('repairs config and route under one shared non-blocking lock', function (): v
 
         $deadline = microtime(true) + 5;
         while (! is_file($counterPath) && microtime(true) < $deadline) {
-            usleep(10000);
+            usleep(10_000);
         }
 
         $second->start();
         $first->wait();
         $second->wait();
-
         $calls = file($counterPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
 
-        expect($first->isSuccessful())->toBeTrue();
-        expect($second->isSuccessful())->toBeTrue();
-        expect($calls)->toBe(['config:cache', 'route:cache']);
-        expect(is_file($cachePath.'/deployment-cache-repair.lock'))->toBeTrue();
-        expect(is_file($cachePath.'/config.php'))->toBeTrue();
-        expect(is_file($cachePath.'/route-source.signature'))->toBeTrue();
+        expect($first->isSuccessful())->toBeTrue()
+            ->and($second->isSuccessful())->toBeTrue()
+            ->and($calls)->toBe(['config:cache', 'route:cache'])
+            ->and(is_file($cachePath.'/deployment-cache-repair.lock'))->toBeTrue()
+            ->and(is_file($cachePath.'/config.php'))->toBeTrue()
+            ->and(is_file($cachePath.'/route-source.signature'))->toBeTrue();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -234,7 +235,10 @@ it('defers pending repair until application termination', function (): void {
     $cachePath = $basePath.'/bootstrap/cache';
 
     try {
-        file_put_contents($cachePath.'/config-cache-refresh.pending', "target=config\nsource_signature=".DeploymentCacheSignatures::config($basePath)."\n");
+        file_put_contents(
+            $cachePath.'/config-cache-refresh.pending',
+            "target=config\nsource_signature=".DeploymentCacheSignatures::config($basePath)."\n",
+        );
         $calls = [];
 
         DeploymentCacheRepairer::runPendingAfterResponse(
@@ -246,7 +250,7 @@ it('defers pending repair until application termination', function (): void {
                 file_put_contents($cachePath.'/config.php', '<?php return [];');
 
                 return 0;
-            }
+            },
         );
 
         expect($calls)->toBe([]);
@@ -272,18 +276,18 @@ it('requeues when sources change while repair is running', function (): void {
             $cachePath,
             static function (string $command) use ($cachePath, $configPath): int {
                 file_put_contents($cachePath.'/config.php', '<?php return [];');
-                file_put_contents($configPath, "<?php return ['name' => 'Changed deployment'];\n");
+                file_put_contents($configPath, "<?php return ['name' => 'Changed deployment with longer source'];\n");
                 clearstatcache(true, $configPath);
 
                 return 0;
-            }
+            },
         );
 
         $nextSignature = FailureMarker::sourceSignature($cachePath.'/config-cache-refresh.pending');
 
-        expect($initialSignature)->not->toBeNull();
-        expect($nextSignature)->not->toBeNull()->not->toBe($initialSignature);
-        expect(is_file($cachePath.'/config.php'))->toBeFalse();
+        expect($initialSignature)->not->toBeNull()
+            ->and($nextSignature)->not->toBeNull()->not->toBe($initialSignature)
+            ->and(is_file($cachePath.'/config.php'))->toBeFalse();
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -296,11 +300,10 @@ it('remembers an uncacheable route signature and suppresses immediate repeated a
     try {
         file_put_contents($cachePath.'/config.php', '<?php return [];');
         DeploymentCacheRepairer::queueMissingCaches($basePath, $cachePath);
-
         DeploymentCacheRepairer::runPending(
             $basePath,
             $cachePath,
-            static fn (string $command): int => $command === 'route:cache' ? 1 : 0
+            static fn (string $command): int => $command === 'route:cache' ? 1 : 0,
         );
 
         $failedSignature = FailureMarker::sourceSignature($cachePath.'/route-cache-refresh.failed');
@@ -308,8 +311,8 @@ it('remembers an uncacheable route signature and suppresses immediate repeated a
 
         DeploymentCacheRepairer::queueMissingCaches($basePath, $cachePath);
 
-        expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse();
-        expect(FailureMarker::sourceSignature($cachePath.'/route-cache-refresh.failed'))->toBe($failedSignature);
+        expect(is_file($cachePath.'/route-cache-refresh.pending'))->toBeFalse()
+            ->and(FailureMarker::sourceSignature($cachePath.'/route-cache-refresh.failed'))->toBe($failedSignature);
     } finally {
         removeRepairerRuntimeProject($basePath);
     }
@@ -320,7 +323,10 @@ it('keeps normal web response work ahead of deferred cache mutation', function (
     $cachePath = $basePath.'/bootstrap/cache';
 
     try {
-        file_put_contents($cachePath.'/config-cache-refresh.pending', "target=config\nsource_signature=".DeploymentCacheSignatures::config($basePath)."\n");
+        file_put_contents(
+            $cachePath.'/config-cache-refresh.pending',
+            "target=config\nsource_signature=".DeploymentCacheSignatures::config($basePath)."\n",
+        );
         $calls = [];
         $uri = '/guard-deferred-'.bin2hex(random_bytes(4));
 
@@ -339,10 +345,11 @@ it('keeps normal web response work ahead of deferred cache mutation', function (
                 file_put_contents($cachePath.'/config.php', '<?php return [];');
 
                 return 0;
-            }
+            },
         );
 
         $this->get($uri)->assertOk()->assertSeeText('ok');
+
         if ($calls === []) {
             $this->app->terminate();
         }
