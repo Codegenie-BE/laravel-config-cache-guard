@@ -60,7 +60,6 @@ final class StatusConfigCacheGuardCommand extends Command
         $configGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_CONFIG');
         $routeGuardEnabled = Environment::flag('CONFIG_CACHE_GUARD_ROUTES');
         $autoRepairEnabled = Environment::flag('CONFIG_CACHE_GUARD_AUTO_REPAIR', true);
-        $automaticMissingCacheCreation = true;
         $failHard = Environment::flag('CONFIG_CACHE_GUARD_FAIL_HARD', false);
         $configCacheExists = is_file($cachedConfigPath);
         $routeCacheExists = $routeCachePaths !== [];
@@ -101,8 +100,8 @@ final class StatusConfigCacheGuardCommand extends Command
             ['Guard enabled', $guardEnabled ? 'yes' : 'no'],
             ['Config guard enabled', $configGuardEnabled ? 'yes' : 'no'],
             ['Route guard enabled', $routeGuardEnabled ? 'yes' : 'no'],
-            ['Create config cache when missing', $automaticMissingCacheCreation ? 'yes (automatic after response)' : 'no'],
-            ['Create route cache when missing', $automaticMissingCacheCreation ? 'yes (automatic after response)' : 'no'],
+            ['Create config cache when missing', 'yes (automatic after response)'],
+            ['Create route cache when missing', 'yes (automatic after response)'],
             ['Auto repair fallback enabled', $autoRepairEnabled ? 'yes' : 'no'],
             ['Versioned route cache enabled', Environment::flag('CONFIG_CACHE_GUARD_VERSIONED_ROUTE_CACHE', true) ? 'yes' : 'no'],
             ['Source signature mode', DeploymentCacheSignatures::mode()],
@@ -315,7 +314,7 @@ final class StatusConfigCacheGuardCommand extends Command
             return 'missing current cache';
         }
 
-        return $this->signatureState($path, $currentSignature, true);
+        return $this->signatureState($path, $currentRouteSignature = $currentSignature, true);
     }
 
     private function normalizePath(string $path): string
