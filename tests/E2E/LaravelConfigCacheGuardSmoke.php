@@ -2,12 +2,7 @@
 
 declare(strict_types=1);
 
-use FilesystemIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
-use RuntimeException;
 use Symfony\Component\Process\Process;
-use Throwable;
 
 require dirname(__DIR__, 2).'/vendor/autoload.php';
 
@@ -39,7 +34,7 @@ $removeDirectory = static function (string $path) use (&$removeDirectory): void 
 
     $items = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST
+        RecursiveIteratorIterator::CHILD_FIRST,
     );
 
     foreach ($items as $item) {
@@ -151,13 +146,14 @@ try {
     }
 
     $configDirectory = $applicationPath.DIRECTORY_SEPARATOR.'config';
+
     if (! is_dir($configDirectory) && ! mkdir($configDirectory, 0777, true) && ! is_dir($configDirectory)) {
         throw new RuntimeException('Could not create the Laravel config directory.');
     }
 
     if (file_put_contents(
         $configDirectory.DIRECTORY_SEPARATOR.'e2e.php',
-        "<?php\n\nreturn ['value' => env('E2E_CONFIG_VALUE', 'missing')];\n"
+        "<?php\n\nreturn ['value' => env('E2E_CONFIG_VALUE', 'missing')];\n",
     ) === false) {
         throw new RuntimeException('Could not create the smoke-test config file.');
     }
@@ -178,7 +174,7 @@ try {
 
     if (file_put_contents(
         $composerPath,
-        json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL
+        json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL,
     ) === false) {
         throw new RuntimeException('Could not update the Laravel composer.json file.');
     }
@@ -195,28 +191,22 @@ try {
 
     $artisan = $applicationPath.DIRECTORY_SEPARATOR.'artisan';
     $run([PHP_BINARY, $artisan, 'config:cache'], $applicationPath);
-    $run(
-        [PHP_BINARY, $artisan, 'config-cache-guard:status'],
-        $applicationPath,
-        ['CONFIG_CACHE_GUARD_ALLOW_CLI' => 'true']
-    );
-
+    $run([PHP_BINARY, $artisan, 'config-cache-guard:status'], $applicationPath);
     $assertCachedValue($configCachePath, 'smoke-initial');
 
     if (! is_file($signaturePath)) {
         throw new RuntimeException('The guard did not persist a config source signature.');
     }
 
-    $writeEnvironmentValue($environmentPath, 'E2E_CONFIG_VALUE', 'smoke-refreshed-value');
+    $writeEnvironmentValue($environmentPath, 'E2E_CONFIG_VALUE', 'smoke-refreshed-value-longer');
 
-    fwrite(STDOUT, '[smoke laravel '.$laravelMajor.'] Verifying stale config repair in the current platform environment'.PHP_EOL);
+    fwrite(STDOUT, '[smoke laravel '.$laravelMajor.'] Verifying explicit CLI stale-cache repair'.PHP_EOL);
     $run(
         [PHP_BINARY, $artisan, 'config-cache-guard:status'],
         $applicationPath,
-        ['CONFIG_CACHE_GUARD_ALLOW_CLI' => 'true']
+        ['CONFIG_CACHE_GUARD_ALLOW_CLI' => 'true'],
     );
-
-    $assertCachedValue($configCachePath, 'smoke-refreshed-value');
+    $assertCachedValue($configCachePath, 'smoke-refreshed-value-longer');
     fwrite(STDOUT, '[smoke laravel '.$laravelMajor.'] Portability smoke scenarios passed'.PHP_EOL);
 } catch (Throwable $exception) {
     fwrite(STDERR, '[smoke laravel '.$laravelMajor.'] '.$exception->getMessage().PHP_EOL);
