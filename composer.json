@@ -115,10 +115,7 @@
         "check:security": "@composer audit --no-interaction",
         "check:support": "@php tests/Support/validate.php",
         "format": "pint",
-        "format:test": [
-            "pint",
-            "git diff --exit-code -- tests/E2E/LaravelConfigCacheGuardProductionE2e.php"
-        ],
+        "format:test": "pint --test",
         "test": "pest",
         "test:coverage": "pest --coverage --min=80",
         "test:e2e": [
