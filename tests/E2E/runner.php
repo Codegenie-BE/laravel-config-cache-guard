@@ -29,7 +29,16 @@ $script = $suite === 'smoke'
     ? __DIR__.'/LaravelConfigCacheGuardSmoke.php'
     : __DIR__.'/LaravelConfigCacheGuardE2e.php';
 
-$process = new Process(array_merge([PHP_BINARY, $script], $forwardedArguments), dirname(__DIR__, 2));
+// These are real fresh Laravel applications exercising production deployment
+// cache behavior. APP_ENV=testing would make Laravel treat the process as a
+// unit-test runtime, suppress CommandFinished rerouting and disable the
+// package's normal missing-cache creation path.
+$environment = ['APP_ENV' => 'production'];
+$process = new Process(
+    array_merge([PHP_BINARY, $script], $forwardedArguments),
+    dirname(__DIR__, 2),
+    $environment,
+);
 $process->setTimeout(null);
 $process->run(static function (string $type, string $output): void {
     fwrite($type === Process::ERR ? STDERR : STDOUT, $output);
