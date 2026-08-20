@@ -8,7 +8,7 @@
 
 **by [Codegenie](https://www.codegenie.be)**
 
-Laravel Config Cache Guard keeps Laravel config and route caches fresh across FTP, shared-hosting and normal deployment workflows. It prevents known-stale deployment cache from being loaded before Laravel boots and can repair or create missing caches without requiring Redis, queues, cron, workers or package-specific environment variables.
+Laravel Config Cache Guard is a zero-configuration safety and performance layer for Laravel config and route cache. It prevents known-stale deployment cache from being loaded before Laravel boots, automatically creates missing caches when Laravel supports them, and repairs cache after the HTTP response without making visitors wait for Artisan compilation.
 
 ## Quick start
 
@@ -16,9 +16,7 @@ Laravel Config Cache Guard keeps Laravel config and route caches fresh across FT
 composer require codegenie-be/laravel-config-cache-guard
 ```
 
-That is enough for the normal zero-configuration flow.
-
-No `public/index.php` change is required and no `CONFIG_CACHE_GUARD_*` variable needs to be added to `.env`.
+That is enough for the normal flow. No `public/index.php` change and no `CONFIG_CACHE_GUARD_*` variable is required.
 
 Optionally inspect the current state with:
 
@@ -30,47 +28,59 @@ php artisan config-cache-guard:status
 
 On normal HTTP traffic the package:
 
-- protects existing Laravel config cache before Laravel can load stale configuration
-- protects existing Laravel route cache before stale routes can be dispatched
-- automatically queues creation of missing config and route caches after the HTTP response
-- uses Laravel's own `Artisan::call()` fallback, so missing-cache optimization does not make the visitor wait for cache compilation
-- uses file locks so concurrent requests do not all rebuild the same pending cache
-- stores deployment signatures in Laravel's active bootstrap cache directory
-- uses signature-based route-cache copies when the default route cache path is used
-- keeps working on shared hosting without SSH, Redis, queues, workers, cron or a database
+- protects existing config cache before Laravel can load stale configuration
+- protects existing route cache before stale routes can be dispatched
+- automatically queues missing config and route cache creation after the response
+- never starts a child PHP process or waits for a repair lock before Laravel boots
+- performs cache generation through Laravel's own `Artisan::call()` after the response
+- serializes config and route mutation behind one non-blocking deployment repair lock
+- uses a deployment source manifest so healthy requests verify known sources without recursively rediscovering them
+- stores signature-based route-cache copies when the default Laravel route-cache path is used
+- works without SSH, Redis, queues, workers, cron, a database or a public repair endpoint
 
-After the first uncached HTTP response of a fresh deployment, later requests can use the generated config and route caches when Laravel can create them successfully.
+## Request path
 
-## Missing cache creation
+The visitor-facing path deliberately contains detection and protection only:
 
-If `bootstrap/cache/config.php` (or the active custom config cache path) is missing, the package queues `config:cache` after the current response.
-
-If route cache is missing, the package queues `route:cache` after the current response.
-
-This is deliberately fail-safe:
-
-- a cache-generation failure never makes Laravel use a broken cache file
-- if `route:cache` is not supported by the application's route definitions, Laravel continues with normal uncached routing
-- a failed missing-cache optimization is tied to the current source signature, so identical source state is not retried on every request
-- when relevant source files change, the package may try the optimization again
-
-### Laravel config-cache contract
-
-Automatic config caching assumes the application follows Laravel's normal production convention: use `env()` inside configuration files and read configuration elsewhere through `config()`.
-
-Code such as this is appropriate:
-
-```php
-config('services.mailgun.secret');
+```text
+HTTP request
+  -> Composer loads bootstrap/guard.php
+  -> verify known deployment source state
+  -> current cache: continue immediately
+  -> stale config: remove it and queue repair
+  -> stale routes: bypass/remove them and queue repair
+  -> Laravel boots with safe cached or uncached state
+  -> HTTP response is sent
+  -> one terminating request acquires the non-blocking repair lock
+  -> config:cache and/or route:cache run only when required
+  -> signatures and the deployment source manifest are refreshed
 ```
 
-Direct `env()` access in application code outside `config/*.php` can behave differently after Laravel config cache is enabled. Applications that rely on that anti-pattern should be corrected before production caching is enabled.
+The pre-bootstrap guard does not run `php artisan`, does not call `proc_open()` and does not wait for another request to finish cache compilation.
 
-## Stale cache protection
+## Deployment source manifest
 
-The Composer-loaded pre-bootstrap guard checks deployment source state before Laravel bootstraps.
+The active Laravel bootstrap cache directory contains a small file:
 
-Relevant sources include:
+```text
+deployment-source.manifest.json
+```
+
+It stores only:
+
+- relative source paths
+- filesystem metadata fingerprints, or one-way content hashes in content mode
+- directory fingerprints used to detect added/removed source files
+- the current config and route signatures
+- a one-way runtime identity for config portability checks
+
+It does **not** store `.env` values or raw application base paths.
+
+When the manifest is current, the guard avoids repeated `RecursiveDirectoryIterator` discovery. It checks the already-known source files and directories directly. When a file or source directory changes, the manifest is rebuilt from one shared traversal and both config and route signatures are derived from that same snapshot.
+
+## Sources covered
+
+Deployment state includes:
 
 - `.env`
 - `.env.{APP_ENV}` when `APP_ENV` is available before Composer loads
@@ -81,33 +91,60 @@ Relevant sources include:
 - `composer.json`
 - `composer.lock`
 
-Config signatures also include a one-way runtime identity derived from the application location and OS family. This prevents config cache generated at a different filesystem location from being accepted as portable when it may contain absolute runtime paths.
+Config signatures also include a one-way runtime identity derived from the application location and OS family. A config cache signed at another runtime path is therefore not assumed to be portable.
 
-The default signature mode uses filesystem metadata. Optional content-signature mode remains available for deployments that intentionally preserve metadata across same-size rewrites.
+The default signature mode uses filesystem metadata. Optional content mode hashes source bytes to detect same-size rewrites that preserve file metadata.
+
+## Missing cache creation
+
+If config cache is missing, the package queues `config:cache` after the current response.
+
+If route cache is missing, the package queues `route:cache` after the current response.
+
+This is fail-safe:
+
+- a failed cache build is removed instead of retained as untracked state
+- routes that Laravel cannot cache continue through normal uncached routing
+- a failed source signature is remembered for a bounded cooldown so identical source state is not retried on every request
+- when source state changes, the package can immediately try again
+
+### Laravel config-cache contract
+
+Automatic config caching assumes normal Laravel production conventions: use `env()` inside configuration files and read values elsewhere through `config()`.
+
+```php
+config('services.mailgun.secret');
+```
+
+Direct `env()` access in application code outside `config/*.php` can behave differently after `config:cache` is enabled and should be corrected before production caching is relied on.
 
 ## Route cache behavior
 
-When Laravel uses its default route-cache location, successful route caching also creates a signature-based cache file:
+When Laravel uses its default route-cache location, a successful route build is also tracked as:
 
 ```text
 bootstrap/cache/routes-<source-signature>.php
 ```
 
-The guard can point Laravel at the cache file for the current source signature before boot. This avoids relying on an old fixed `routes-v7.php` inode or stale OPcache entry after deployment.
+The pre-bootstrap guard points Laravel at the route cache for the **current** source signature. If that file does not exist, Laravel falls back to uncached route registration for the current request while repair is queued. An old route cache can remain on disk without being selected.
 
-Explicit custom `APP_ROUTES_CACHE` paths are respected when they are available before Composer loads.
+Explicit custom `APP_ROUTES_CACHE` paths remain supported when they are available before Composer loads. Stale custom route cache is removed rather than redirected to a package-managed versioned path.
 
 ## Concurrency
 
-Deferred cache repair uses non-blocking file locks.
+Deferred cache mutation uses one file:
 
-When multiple requests arrive together after a deployment, only the request that acquires the relevant repair lock performs that pending cache operation. Other requests do not wait for that after-response repair lock.
+```text
+deployment-cache-repair.lock
+```
 
-Missing-cache creation is queued after the current HTTP response, so the visitor who discovers a fresh uncached deployment does not wait for `config:cache` or `route:cache` to compile.
+The lock is non-blocking. If 20 requests finish at the same time after a deployment, one worker performs the pending config/route repair and the others return from termination without waiting.
+
+Config and route cache commands are executed sequentially by that one repair owner, avoiding simultaneous deployment-cache mutation by different workers.
 
 ## Native deployment commands
 
-A correct deployment pipeline may still build caches explicitly:
+A deployment pipeline with command access can still build caches explicitly:
 
 ```bash
 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
@@ -116,9 +153,9 @@ php artisan route:cache
 php artisan config-cache-guard:status --strict
 ```
 
-Successful native `config:cache` and `route:cache` commands are tracked automatically. The package records the corresponding source signatures immediately, and the normal route flow prepares the signature-based route-cache copy.
+Only run `route:cache` manually when the application's routes support Laravel route caching.
 
-Only run `route:cache` manually when the application supports Laravel route caching.
+Successful native cache commands are tracked automatically. The package records current deployment signatures and prepares the signature-based route cache where appropriate.
 
 ## Shared hosting and FTP-only deployments
 
@@ -126,15 +163,15 @@ Destination-side shell access is optional.
 
 For FTP-only or restricted shared hosting:
 
-1. install or package production Composer dependencies before deployment
-2. upload a clean release rather than overlaying an old vendor tree where possible
+1. package or install production Composer dependencies before upload
+2. upload a clean release instead of overlaying an old vendor tree when possible
 3. preserve the production `.env`
 4. keep Laravel's active bootstrap cache directory writable by PHP
 5. send normal HTTP traffic
 
-If deployment cache is missing, the package queues creation after the response. If existing deployment cache is stale, the pre-bootstrap guard rejects or bypasses it before Laravel uses it and the existing repair flow refreshes it safely.
+Missing cache is generated after a response. Existing stale cache is rejected or bypassed before Laravel uses it. No PHP CLI binary has to be configured for the HTTP fallback.
 
-See [deployment recipes](docs/deployment-recipes.md) for concrete hosting flows.
+See [deployment recipes](docs/deployment-recipes.md) for concrete flows.
 
 ## Status command
 
@@ -142,7 +179,7 @@ See [deployment recipes](docs/deployment-recipes.md) for concrete hosting flows.
 php artisan config-cache-guard:status
 ```
 
-The command reports the active cache paths, cache/signature state, pending and failed repairs, recent successful repairs and deployment-health diagnostics.
+The command reports active cache paths, deployment-source manifest state, config/route signatures, pending and failed repair state, recent successful repairs and the shared deferred repair lock.
 
 Use strict mode in deployment automation:
 
@@ -150,7 +187,7 @@ Use strict mode in deployment automation:
 php artisan config-cache-guard:status --strict
 ```
 
-Clear repaired or intentionally resolved failure state with:
+Clear intentionally resolved failure state with:
 
 ```bash
 php artisan config-cache-guard:status --clear-failures
@@ -158,18 +195,41 @@ php artisan config-cache-guard:status --clear-failures
 
 ## Optional overrides
 
-The package works without package-specific environment variables. Existing advanced overrides remain supported for compatibility when they are provided as real process or web-server environment variables before Composer loads.
+The normal package behavior needs no package-specific environment variables. Existing compatibility overrides remain available when configured before Composer loads, including:
 
-Examples include disabling a guard target, selecting content-signature mode, custom cache paths, process timeouts and PHP CLI discovery for the legacy bounded pre-bootstrap repair path.
+- disabling the complete guard or one cache target
+- disabling automatic after-response repair
+- selecting `content` signature mode
+- disabling signature-based route cache files
+- enabling fail-hard diagnostics
+- changing the failure retry cooldown
 
-Normal applications should not need to configure them.
-
-Laravel's own optional cache-path overrides are also respected:
+Laravel's own optional cache path overrides are also respected:
 
 - `APP_CONFIG_CACHE`
 - `APP_ROUTES_CACHE`
 
-No override is required for the standard Laravel paths.
+No override is required for standard Laravel paths.
+
+## Files written by the package
+
+Depending on active cache state, the Laravel bootstrap cache directory can contain:
+
+```text
+config-source.signature
+route-source.signature
+deployment-source.manifest.json
+deployment-cache-repair.lock
+config-cache-refresh.pending
+config-cache-refresh.failed
+config-cache-refresh.succeeded
+route-cache-refresh.pending
+route-cache-refresh.failed
+route-cache-refresh.succeeded
+routes-<source-signature>.php
+```
+
+Markers contain safe reason/action metadata and optional one-way source signatures, never `.env` values or command output.
 
 ## Requirements
 
@@ -178,21 +238,20 @@ No override is required for the standard Laravel paths.
 - writable active Laravel bootstrap cache directory (`bootstrap/cache` or `.laravel/cache`)
 - writable configured cache destination when a custom Laravel cache path is used
 
-No database, Redis, queue worker, cron task, public repair endpoint or secret repair token is required.
-
 ## Failure behavior
 
 | Situation | Behavior |
 | --- | --- |
-| Cache is current | Continue normally. |
+| Cache and manifest are current | Verify known sources and continue. |
 | Config cache is missing | Queue `config:cache` after the response. |
 | Route cache is missing | Queue `route:cache` after the response. |
-| Missing route cache cannot be created | Continue with normal uncached routing and remember the failed source signature. |
-| Config source/runtime state changed | Reject stale config cache before Laravel can load it and repair safely. |
-| Route source state changed | Bypass stale route cache and repair safely. |
-| Pending repair lock is held by another request | Do not duplicate that repair. |
-| Rebuilt cache signature cannot be stored | Do not retain untracked deployment cache. |
-| Known-stale cache cannot be removed safely | Stop with a safe 503 instead of loading known-stale state. |
+| Route cache cannot be created | Continue with uncached routing and remember the source signature for the retry cooldown. |
+| Config source/runtime state changed | Remove stale config before Laravel can load it and queue repair. |
+| Route source state changed | Point Laravel away from stale routes and queue repair. |
+| Repair lock is held by another request | Return immediately; do not duplicate repair. |
+| Sources change during repair | Discard the just-built cache and requeue the new signature. |
+| Rebuilt cache signature cannot be stored | Remove the untracked cache. |
+| Known-stale cache cannot be removed | Stop with a safe 503 rather than load known-stale state. |
 
 ## Development
 
@@ -203,24 +262,22 @@ composer install
 composer check:all
 ```
 
-Before a release, also run the real Laravel application E2E suite:
+Before a release, also run:
 
 ```bash
 composer test:e2e
 composer check:release
 ```
 
-The repository validates Laravel 12 and 13 across their supported PHP matrix and includes cross-platform portability coverage.
+The repository validates Laravel 12 and 13 across their supported PHP matrix and includes Windows, macOS, Linux ARM64 and Alpine portability coverage.
 
 ## Security and privacy
 
-The package is intentionally file-based and local to the Laravel application.
-
 - no `.env` values are logged or persisted
-- raw runtime filesystem paths are not persisted in deployment signatures
+- raw runtime filesystem paths are not persisted in deployment signatures or the source manifest
 - no data is sent to an external service
 - no database, Redis, queue, worker or cron dependency is required
-- cache signatures are written atomically
+- cache/signature/manifest writes are atomic
 - stale deployment cache is never knowingly preferred over safe uncached execution
 
 Report security issues privately. See [SECURITY.md](SECURITY.md).

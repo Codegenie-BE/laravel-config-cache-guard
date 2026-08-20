@@ -52,6 +52,17 @@ final class FailureMarker
             : null;
     }
 
+    public static function isRecent(string $path, int $seconds): bool
+    {
+        if (! is_file($path) || $seconds < 1) {
+            return false;
+        }
+
+        $mtime = @filemtime($path);
+
+        return is_int($mtime) && $mtime > (time() - $seconds);
+    }
+
     /**
      * @return array<string, string>
      */

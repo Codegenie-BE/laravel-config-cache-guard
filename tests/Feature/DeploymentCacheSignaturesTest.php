@@ -47,19 +47,27 @@ function removeSignatureRuntimeProject(string $path): void
     @rmdir($path);
 }
 
+it('calculates config and route signatures from the same snapshot', function (): void {
+    $basePath = makeSignatureRuntimeProject();
+
+    try {
+        $both = DeploymentCacheSignatures::both($basePath);
+
+        expect($both['config'])->toBe(DeploymentCacheSignatures::config($basePath));
+        expect($both['routes'])->toBe(DeploymentCacheSignatures::routes($basePath));
+    } finally {
+        removeSignatureRuntimeProject($basePath);
+    }
+});
+
 it('invalidates config signatures when dependency or provider metadata changes', function (): void {
     $basePath = makeSignatureRuntimeProject();
 
     try {
         $initial = DeploymentCacheSignatures::config($basePath);
-
         file_put_contents($basePath.'/composer.lock', "{\"content-hash\":\"two-and-longer\"}\n");
         $afterComposerChange = DeploymentCacheSignatures::config($basePath);
-
-        file_put_contents(
-            $basePath.'/app/Providers/AppServiceProvider.php',
-            "<?php return 'provider-two-and-longer';\n"
-        );
+        file_put_contents($basePath.'/app/Providers/AppServiceProvider.php', "<?php return 'provider-two-and-longer';\n");
         $afterProviderChange = DeploymentCacheSignatures::config($basePath);
 
         expect($initial)->not->toBeNull();
@@ -75,11 +83,7 @@ it('invalidates route signatures when configuration used by route registration c
 
     try {
         $initial = DeploymentCacheSignatures::routes($basePath);
-
-        file_put_contents(
-            $basePath.'/config/app.php',
-            "<?php return ['name' => 'Codegenie', 'feature' => true];\n"
-        );
+        file_put_contents($basePath.'/config/app.php', "<?php return ['name' => 'Codegenie', 'feature' => true];\n");
         $afterConfigChange = DeploymentCacheSignatures::routes($basePath);
 
         expect($initial)->not->toBeNull();
@@ -96,13 +100,8 @@ it('uses Laravel 13 dot-laravel bootstrap sources when that directory exists', f
         mkdir($basePath.'/.laravel', 0777, true);
         file_put_contents($basePath.'/.laravel/app.php', "<?php return 'dot-laravel-one';\n");
         file_put_contents($basePath.'/.laravel/providers.php', "<?php return [];\n");
-
         $initial = DeploymentCacheSignatures::routes($basePath);
-
-        file_put_contents(
-            $basePath.'/.laravel/app.php',
-            "<?php return 'dot-laravel-two-and-longer';\n"
-        );
+        file_put_contents($basePath.'/.laravel/app.php', "<?php return 'dot-laravel-two-and-longer';\n");
         $afterBootstrapChange = DeploymentCacheSignatures::routes($basePath);
 
         expect($initial)->not->toBeNull();
@@ -123,7 +122,6 @@ it('can detect same-size rewrites through content signatures', function (): void
         $changedContents = str_replace('Codegenie', 'Guardrail', $originalContents);
 
         expect(strlen($changedContents))->toBe(strlen($originalContents));
-
         file_put_contents($configPath, $changedContents);
 
         if (is_int($originalMtime)) {
@@ -132,8 +130,7 @@ it('can detect same-size rewrites through content signatures', function (): void
 
         clearstatcache(true, $configPath);
 
-        expect(DeploymentCacheSignatures::config($basePath, 'content'))
-            ->not->toBe($initial);
+        expect(DeploymentCacheSignatures::config($basePath, 'content'))->not->toBe($initial);
     } finally {
         removeSignatureRuntimeProject($basePath);
     }
