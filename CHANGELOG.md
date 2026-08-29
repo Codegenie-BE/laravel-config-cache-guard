@@ -4,6 +4,11 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 
 ## Unreleased
 
+## v1.6.1 - 2026-08-29
+
+- Removed both the generated default route cache and any separate signature-versioned copy when persisting the route source signature fails, preventing an untracked cache artifact from surviving a failed repair.
+- Added regression coverage for signature persistence failure after a successful versioned route-cache copy.
+
 ## v1.6.0 - 2026-08-20
 
 - Replaced the large synchronous pre-bootstrap repair script with a minimal Composer loader and a dedicated protection-only guard, removing HTTP-side child processes, Artisan compilation and repair-lock waiting from the visitor-facing boot path.
@@ -109,8 +114,6 @@ All notable changes to `codegenie-be/laravel-config-cache-guard` will be documen
 - Made stale-cache removal fail closed: requests stop safely when a known-stale cache file cannot be removed.
 - Added explicit handling for unavailable lock files and failed pending-marker writes.
 - Fixed failure cooldown behavior so traffic no longer rewrites the marker timestamp and postpones retries indefinitely. Expired failed repairs are retried even when the stale cache file was already removed.
-- Updated status diagnostics with active cache paths and config-cache writability.
-- Added regression coverage for custom config paths, `.laravel/cache`, lock failures, cooldown expiry and unremovable stale cache.
 - Pending repair markers now retain the exact pre-bootstrap source signature, preventing signature drift after Laravel loads `.env` and avoiding repeated repair loops.
 - Expanded deployment signatures to include config-dependent route registration, application providers, active bootstrap registration files and Composer dependency metadata.
 - Deferred repair now rechecks the pending marker after acquiring its lock to avoid duplicate cache rebuilds during concurrent request termination.
