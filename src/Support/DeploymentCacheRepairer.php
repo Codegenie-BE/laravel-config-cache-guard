@@ -310,6 +310,7 @@ final class DeploymentCacheRepairer
         $versionedWritten = false;
         $signatureAttempted = false;
         $signatureWritten = false;
+        $trackedCacheFile = null;
 
         if (
             $exitCode === 0
@@ -349,6 +350,11 @@ final class DeploymentCacheRepairer
         }
 
         $removed = self::removeCacheFile($cacheFile);
+
+        if ($trackedCacheFile !== null) {
+            $removed = self::removeCacheFile($trackedCacheFile) && $removed;
+        }
+
         @unlink($pendingPath);
 
         if ($sourceChanged) {
